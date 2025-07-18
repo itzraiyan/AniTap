@@ -436,3 +436,117 @@ def follow_random_users(config):
         close_progress_bar(bar)
 
     print_success(f"Finished following users! Followed: {followed}, Failed: {failed}")
+
+def human_like_liker(config):
+    """
+    Expose 'human_like_liker' for main.py import.
+    """
+    token = config.get("token")
+    if not token:
+        print_error("No AniList token found! Please authenticate in Account Management.")
+        return
+    print_info(
+        "Starting Human-Like Random Liker Mode...\n"
+        "AniTap will randomly like activities across global, following, followers, and optionally specified profiles, with realistic human-like breaks."
+    )
+
+    profile_list = ask_for_usernames(
+        "Optional: Enter AniList usernames (comma-separated) to include in the mix, or just press Enter for default sources:",
+        allow_all=False
+    )
+    total_likes = ask_for_limit(
+        "Total number of likes for this session? (Enter number or 'unlimited')",
+        default="100"
+    )
+    session_time_limit = ask_for_limit(
+        "Or run for how many minutes? (Enter number or leave blank for no time limit):",
+        default=None
+    )
+    session_likes = 0
+    session_start = time.time()
+
+    sources = ["global", "following", "followers"]
+    if profile_list:
+        sources.append("profile")
+
+    try:
+        while True:
+            if session_time_limit is not None:
+                if (time.time() - session_start) > (session_time_limit * 60):
+                    print_success(f"Session time limit reached. Total likes this session: {session_likes}")
+                    break
+            src = random.choice(sources)
+            acts = []
+            source_name = ""
+            if src == "global":
+                acts = fetch_all_unliked_activities(fetch_global_activities, token)
+                source_name = "Global"
+            elif src == "following":
+                user_list = get_following_user_ids(token)
+                if not user_list:
+                    print_warning("You are not following anyone! Skipping following mode.")
+                    continue
+                uid = random.choice(user_list)
+                acts = fetch_all_unliked_activities(fetch_profile_activities, token, uid)
+                source_name = f"Following ({uid})"
+            elif src == "followers":
+                user_list = get_follower_user_ids(token)
+                if not user_list:
+                    print_warning("You have no followers! Skipping followers mode.")
+                    continue
+                uid = random.choice(user_list)
+                acts = fetch_all_unliked_activities(fetch_profile_activities, token, uid)
+                source_name = f"Follower ({uid})"
+            else:  # profile
+                if not profile_list:
+                    continue
+                prof = random.choice(profile_list)
+                user_id = get_user_id(prof)
+                acts = fetch_all_unliked_activities(fetch_profile_activities, token, user_id)
+                source_name = f"Profile ({prof})"
+
+            if not acts:
+                continue
+
+            random.shuffle(acts)
+            batch_size = random.randint(10, 30)
+            acts_to_like = acts[:batch_size]
+            if total_likes is not None and session_likes + len(acts_to_like) > total_likes:
+                acts_to_like = acts_to_like[:total_likes - session_likes]
+            if not acts_to_like:
+                continue
+            print_info(f"Liking {len(acts_to_like)} activities from {source_name}...")
+            total, liked, skipped, failed, failed_ids = like_activities(acts_to_like, token, config, human_like=True)
+            session_likes += liked
+
+            show_summary(f"Human-like: {source_name}", total, liked, skipped, failed)
+
+            if random.random() < 0.35:
+                break_time = random.choice([60, 180, 900, 1800, 3600])
+                msg = f"AniTap is taking a human-like break for {break_time//60} minutes..."
+                print_warning(msg)
+                try:
+                    for i in range(break_time):
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    print_warning("Interrupted during human-like break. Ending session early.")
+                    break
+
+            if random.random() < 0.1:
+                idle_time = random.randint(60, 300)
+                print_info(f"AniTap is idling like a distracted human for {idle_time//60} minutes...")
+                try:
+                    for i in range(idle_time):
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    print_warning("Interrupted while idling. Ending session early.")
+                    break
+
+            if total_likes is not None and session_likes >= total_likes:
+                print_success(f"Session complete! Total likes this session: {session_likes}")
+                break
+
+    except KeyboardInterrupt:
+        print_warning("Session interrupted by user. Saving progress and showing summary...")
+
+    print_success(f"Human-Like Random Liker Mode finished! Total likes: {session_likes}.")
