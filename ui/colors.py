@@ -4,7 +4,7 @@ try:
     from colorama import Fore, Style, init as colorama_init
     colorama_init(autoreset=True)
 except ImportError:
-    # Fallback: no color
+    # Fallback if colorama not installed (no color)
     class ForeDummy:
         RED = GREEN = YELLOW = CYAN = MAGENTA = WHITE = RESET = ""
     class StyleDummy:
@@ -18,6 +18,7 @@ def color_text(text, color):
 def boxed_text(text, color="WHITE", width=60):
     import textwrap
     lines = []
+    # Improved: preserve blank lines between paragraphs, wrap each paragraph separately.
     paragraphs = text.split('\n')
     for paragraph in paragraphs:
         if paragraph.strip() == "":
