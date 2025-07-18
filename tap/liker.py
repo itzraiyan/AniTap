@@ -2,8 +2,8 @@
 tap/liker.py
 
 Flexible AniList Liker Logic:
-- Interactive CLI: asks user for how many posts to like (or unlimited), number of users from following (or all), and profiles.
-- Liking Modes: global, following (pick users), profile (pick one or multiple).
+- Interactive CLI: asks user for how many posts to like (or unlimited), number of users from following/followers (or all), and profiles.
+- Liking Modes: global, following, followers, profile (pick one or multiple).
 - Human-like mode: random delays, breaks, source switching.
 - Never likes already-liked posts.
 - Shows clean boxed summary with stats.
@@ -18,7 +18,7 @@ from ui.prompts import (
 from ui.colors import boxed_text
 from anilist.api import (
     fetch_global_activities, fetch_following_activities, fetch_profile_activities,
-    like_activity, get_viewer_info, get_user_id, follow_user, get_following_user_ids, search_users
+    get_following_user_ids, get_follower_user_ids, like_activity, get_user_id
 )
 from config.config import (
     add_failed_action, clear_failed_actions, get_failed_actions, save_config, load_config
@@ -28,7 +28,7 @@ def ask_for_limit(prompt, default=None):
     while True:
         val = prompt_boxed(prompt, default=default, color="MAGENTA")
         if val.lower() in ("unlimited", "inf", "forever"):
-            return None
+            return None  # None means unlimited
         try:
             num = int(val)
             if num < 1:
@@ -55,17 +55,20 @@ def show_summary(mode, total, liked, skipped, failed):
     )
     print(boxed_text(summary, "CYAN"))
 
-def fetch_all_activities(fetch_func, token, limit=None):
+def fetch_all_activities(fetch_func, token, user_id=None, limit=None):
     # Fetches activities across all available pages, up to the limit
     activities = []
     page = 1
     per_page = 30
     while True:
-        acts = fetch_func(token, page=page, per_page=per_page)
+        if user_id is not None:
+            acts = fetch_func(token, user_id, page=page, per_page=per_page)
+        else:
+            acts = fetch_func(token, page=page, per_page=per_page)
         if not acts:
             break
         activities.extend(acts)
-        if limit and len(activities) >= limit:
+        if limit is not None and len(activities) >= limit:
             activities = activities[:limit]
             break
         if len(acts) < per_page:
@@ -93,7 +96,6 @@ def like_activities(activities, token, config, human_like=False):
                 failed += 1
                 failed_ids.append(actid)
                 add_failed_action(config, actid)
-            # Human-like delays
             if human_like:
                 r = random.random()
                 if r < 0.80:
@@ -101,7 +103,7 @@ def like_activities(activities, token, config, human_like=False):
                 elif r < 0.95:
                     delay = random.uniform(30, 120)
                 else:
-                    delay = random.uniform(600, 1800)  # 10-30 min
+                    delay = random.uniform(600, 1800)
                 print_info(f"Waiting {int(delay)} seconds (human-like)...")
                 time.sleep(delay)
             else:
@@ -125,44 +127,52 @@ def like_global(config, human_like=False):
         return
     limit = ask_for_limit("How many global posts to like? (Enter number or 'unlimited')", default="100")
     print_info("Fetching global activities...")
-    acts = fetch_all_activities(fetch_global_activities, token, limit)
+    acts = fetch_all_activities(fetch_global_activities, token, None, limit)
     if not acts:
         print_warning("No global activities found!")
         return
     total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
     show_summary("Global", total, liked, skipped, failed)
 
-def like_following(config, human_like=False):
+def like_following_or_followers(config, mode="following", human_like=False):
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-    num_users = ask_for_limit("How many users from your following list to pick? (Enter number or 'all')", default="10")
-    print_info("Fetching your following list...")
-    following_ids = get_following_user_ids(token)
-    if not following_ids:
-        print_warning("You are not following anyone!")
+    user_list = None
+    if mode == "following":
+        print_info("Fetching your following list...")
+        user_list = get_following_user_ids(token)
+    elif mode == "followers":
+        print_info("Fetching your follower list...")
+        user_list = get_follower_user_ids(token)
+    else:
+        print_error(f"Unknown mode: {mode}")
         return
-    if num_users and num_users < len(following_ids):
-        following_ids = random.sample(following_ids, num_users)
+    if not user_list:
+        print_warning(f"You have no {mode}!")
+        return
+    num_users = ask_for_limit(f"How many users from your {mode} to pick? (Enter number or 'all')", default="10")
+    if num_users and num_users < len(user_list):
+        user_list = random.sample(user_list, num_users)
     acts = []
-    for uid in following_ids:
-        acts.extend(fetch_all_activities(lambda t, page, per_page: fetch_profile_activities(t, uid, page=page, per_page=per_page), token))
+    for uid in user_list:
+        acts.extend(fetch_all_activities(fetch_profile_activities, token, uid))
     if not acts:
-        print_warning("No activities found for followed users!")
+        print_warning(f"No activities found for {mode} users!")
         return
-    limit = ask_for_limit("How many posts to like from your following list? (Enter number or 'unlimited')", default="100")
+    limit = ask_for_limit(f"How many posts to like from your {mode} list? (Enter number or 'unlimited')", default="100")
     if limit:
         acts = acts[:limit]
     total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
-    show_summary("Following", total, liked, skipped, failed)
+    show_summary(mode.capitalize(), total, liked, skipped, failed)
 
 def like_profile(config, human_like=False):
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-    usernames = ask_for_usernames("Enter one or more AniList usernames (comma-separated) to like all posts from:")
+    usernames = ask_for_usernames("Enter one or more AniList usernames (comma-separated) to like posts from:")
     if not usernames:
         print_warning("No usernames provided!")
         return
@@ -171,7 +181,7 @@ def like_profile(config, human_like=False):
         try:
             user_id = get_user_id(username)
             print_info(f"Fetching activities from profile '{username}' (ID: {user_id})...")
-            acts = fetch_all_activities(lambda t, page, per_page: fetch_profile_activities(t, user_id, page=page, per_page=per_page), token, limit)
+            acts = fetch_all_activities(fetch_profile_activities, token, user_id, limit)
             if not acts:
                 print_warning(f"No activities found for user '{username}'.")
                 continue
@@ -185,32 +195,38 @@ def human_like_liker(config):
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-    print_info("Starting Human-Like Random Liker Mode...\nAniTap will randomly like activities across global, following, and provided profiles, with human-like breaks.")
+    print_info("Starting Human-Like Random Liker Mode...\nAniTap will randomly like activities across global, following, followers, and provided profiles, with human-like breaks.")
 
-    # Ask for profile list for randomness
     profile_list = ask_for_usernames("Enter comma-separated AniList usernames for human-like mode (or leave blank):", allow_all=False)
     limit = ask_for_limit("How many posts to like this session? (Enter number or 'unlimited')", default="100")
     session_likes = 0
 
-    sources = ["global", "following", "profile"]
-
+    sources = ["global", "following", "followers", "profile"]
     while True:
         src = random.choice([s for s in sources if (s != "profile" or profile_list)])
         if src == "global":
             acts = fetch_all_activities(fetch_global_activities, token)
             source_name = "Global"
         elif src == "following":
-            following_ids = get_following_user_ids(token)
-            if not following_ids:
+            user_list = get_following_user_ids(token)
+            if not user_list:
                 print_warning("You are not following anyone! Skipping following mode.")
                 continue
-            uid = random.choice(following_ids)
-            acts = fetch_all_activities(lambda t, page, per_page: fetch_profile_activities(t, uid, page=page, per_page=per_page), token)
+            uid = random.choice(user_list)
+            acts = fetch_all_activities(fetch_profile_activities, token, uid)
             source_name = f"Following ({uid})"
+        elif src == "followers":
+            user_list = get_follower_user_ids(token)
+            if not user_list:
+                print_warning("You have no followers! Skipping followers mode.")
+                continue
+            uid = random.choice(user_list)
+            acts = fetch_all_activities(fetch_profile_activities, token, uid)
+            source_name = f"Follower ({uid})"
         else:
             prof = random.choice(profile_list)
             user_id = get_user_id(prof)
-            acts = fetch_all_activities(lambda t, page, per_page: fetch_profile_activities(t, user_id, page=page, per_page=per_page), token)
+            acts = fetch_all_activities(fetch_profile_activities, token, user_id)
             source_name = f"Profile ({prof})"
 
         random.shuffle(acts)
@@ -221,7 +237,6 @@ def human_like_liker(config):
                 acts_to_like.append(act)
                 if len(acts_to_like) >= batch_size:
                     break
-        # Enforce session limit
         if limit is not None and session_likes + len(acts_to_like) > limit:
             acts_to_like = acts_to_like[:limit - session_likes]
         if not acts_to_like:
@@ -231,9 +246,8 @@ def human_like_liker(config):
         session_likes += liked
 
         show_summary(f"Human-like: {source_name}", total, liked, skipped, failed)
-        # Random break
         if random.random() < 0.35:
-            break_time = random.choice([60, 180, 900, 1800, 3600])  # 1 min, 3 min, 15 min, 30 min, 1 hr
+            break_time = random.choice([60, 180, 900, 1800, 3600])
             msg = f"AniTap is taking a human-like break for {break_time//60} minutes..."
             print_warning(msg)
             time.sleep(break_time)
@@ -243,29 +257,3 @@ def human_like_liker(config):
             break
 
     print_success(f"Human-Like Random Liker Mode finished! Total likes: {session_likes}.")
-
-def follow_random_users(config):
-    token = config.get("token")
-    if not token:
-        print_error("No AniList token found! Please authenticate in Account Management.")
-        return
-    num_to_follow = ask_for_limit("How many random users to follow? (Enter number or 'unlimited')", default="100")
-    print_info("Searching for random users to follow...")
-    # For demonstration, search users by a popular query. In reality, you'd want to fetch a list of users in some smart way.
-    random_users = search_users(token, num_to_follow)
-    if not random_users:
-        print_warning("No users found to follow!")
-        return
-    followed = 0
-    for user in random_users:
-        try:
-            if follow_user(user["id"], token):
-                followed += 1
-                print_success(f"Followed user: {user['name']} (ID: {user['id']})")
-            else:
-                print_warning(f"Failed to follow user: {user['name']} (ID: {user['id']})")
-        except Exception as e:
-            print_error(f"Error following user {user['name']}: {e}")
-        if num_to_follow and followed >= num_to_follow:
-            break
-    print_info(f"Followed {followed} users.")
