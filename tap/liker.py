@@ -7,6 +7,7 @@ Flexible AniList Liker Logic:
 - Human-like mode: random delays, breaks, source switching.
 - Never likes already-liked posts.
 - Shows clean boxed summary with stats.
+- *NEW*: Follow random users functionality.
 """
 
 import time
@@ -23,6 +24,10 @@ from anilist.api import (
 from config.config import (
     add_failed_action, clear_failed_actions, get_failed_actions, save_config, load_config
 )
+
+import requests
+
+ANILIST_API = "https://graphql.anilist.co"
 
 def ask_for_limit(prompt, default=None):
     while True:
@@ -263,3 +268,67 @@ def human_like_liker(config):
             break
 
     print_success(f"Human-Like Random Liker Mode finished! Total likes: {session_likes}.")
+
+def follow_random_users(config):
+    """
+    Follows random users on AniList.
+    """
+    token = config.get("token")
+    if not token:
+        print_error("No AniList token found! Please authenticate in Account Management.")
+        return
+
+    count = ask_for_limit("How many random users do you want to follow? (Enter number or 'unlimited')", default="10")
+    # Fetch list of random user IDs (simulate by using global activities' user IDs)
+    print_info("Fetching global activities to find potential users to follow...")
+    activities = fetch_all_activities(fetch_global_activities, token, None, count * 2 if count else 200)
+    user_ids = set()
+    for act in activities:
+        uid = act.get("user", {}).get("id") or act.get("userId") or act.get("user_id")
+        if uid:
+            user_ids.add(uid)
+        # Some activities may not have user info, ignore
+
+    # Remove self from user_ids
+    try:
+        from anilist.api import get_viewer_id
+        self_id = get_viewer_id(token)
+        user_ids.discard(self_id)
+    except Exception:
+        pass
+
+    # Pick random users
+    user_ids = list(user_ids)
+    if not user_ids:
+        print_warning("Could not find any users to follow.")
+        return
+    if count is not None and count < len(user_ids):
+        user_ids = random.sample(user_ids, count)
+    else:
+        user_ids = user_ids[:count] if count else user_ids
+
+    print_info(f"Attempting to follow {len(user_ids)} users...")
+    followed = failed = 0
+    for uid in print_progress_bar(user_ids, "Following Users"):
+        query = '''
+        mutation ($userId: Int) {
+            FollowUser(userId: $userId) {
+                id
+                isFollowing
+            }
+        }
+        '''
+        headers = {"Authorization": f"Bearer {token}"}
+        variables = {"userId": uid}
+        resp = requests.post(ANILIST_API, json={"query": query, "variables": variables}, headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("data", {}).get("FollowUser", {}).get("isFollowing", False):
+                followed += 1
+            else:
+                failed += 1
+        else:
+            failed += 1
+            print_error(f"Failed to follow user {uid}: {resp.status_code} {resp.text}")
+
+    print_success(f"Finished following users! Followed: {followed}, Failed: {failed}")
