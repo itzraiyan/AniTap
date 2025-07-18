@@ -12,7 +12,7 @@ from tap.liker import (
     like_followers,
     like_profile,
     human_like_liker,
-    follow_random_users      # <-- ADDED
+    follow_random_users
 )
 
 def account_management(config):
@@ -88,7 +88,7 @@ def main():
                 "Like posts from users who follow you",
                 "Like posts on a specific profile",
                 "Human-like random liking (imitate real user)",
-                "Follow random users",           # <-- ADDED
+                "Follow random users",
                 "Account management (add/switch/remove)",
                 "Settings",
                 "Exit"
@@ -96,67 +96,80 @@ def main():
             helpmsg=MAIN_MENU_HELP + "\n5: Human-like mode randomly likes activities from different sources with random breaks/delays.\n6: Follow random users."
         )
 
-        if choice == 1:
-            if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")
+        try:
+            if choice == 1:
+                if not config.get("token"):
+                    print_warning("No AniList account authenticated yet. Please add an account first!")
+                    config = account_management(config)
+                like_global(config)
+                print_outro()
+                break
+
+            elif choice == 2:
+                if not config.get("token"):
+                    print_warning("No AniList account authenticated yet. Please add an account first!")
+                    config = account_management(config)
+                like_following(config)
+                print_outro()
+                break
+
+            elif choice == 3:
+                if not config.get("token"):
+                    print_warning("No AniList account authenticated yet. Please add an account first!")
+                    config = account_management(config)
+                like_followers(config)
+                print_outro()
+                break
+
+            elif choice == 4:
+                if not config.get("token"):
+                    print_warning("No AniList account authenticated yet. Please add an account first!")
+                    config = account_management(config)
+                like_profile(config)
+                print_outro()
+                break
+
+            elif choice == 5:
+                if not config.get("token"):
+                    print_warning("No AniList account authenticated yet. Please add an account first!")
+                    config = account_management(config)
+                human_like_liker(config)
+                print_outro()
+                break
+
+            elif choice == 6:
+                if not config.get("token"):
+                    print_warning("No AniList account authenticated yet. Please add an account first!")
+                    config = account_management(config)
+                follow_random_users(config)
+                print_outro()
+                break
+
+            elif choice == 7:
                 config = account_management(config)
-            like_global(config)
-            print_outro()
-            break
 
-        elif choice == 2:
-            if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")
-                config = account_management(config)
-            like_following(config)
-            print_outro()
-            break
+            elif choice == 8:
+                settings_menu(config)
 
-        elif choice == 3:
-            if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")
-                config = account_management(config)
-            like_followers(config)
-            print_outro()
-            break
+            elif choice == 9:
+                print_success("Thanks for using AniTap! See you next time, senpai!")
+                print_outro()
+                sys.exit(0)
 
-        elif choice == 4:
-            if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")
-                config = account_management(config)
-            like_profile(config)
-            print_outro()
-            break
-
-        elif choice == 5:
-            if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")
-                config = account_management(config)
-            human_like_liker(config)
-            print_outro()
-            break
-
-        elif choice == 6:
-            if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")
-                config = account_management(config)
-            follow_random_users(config)
-            print_outro()
-            break
-
-        elif choice == 7:
-            config = account_management(config)
-
-        elif choice == 8:
-            settings_menu(config)
-
-        elif choice == 9:
-            print_success("Thanks for using AniTap! See you next time, senpai!")
+            else:
+                print_error("Invalid selection. Please choose a valid option.")
+        except KeyboardInterrupt:
+            print_warning("Interrupted by user. Exiting gracefully...")
             print_outro()
             sys.exit(0)
-
-        else:
-            print_error("Invalid selection. Please choose a valid option.")
+        except Exception as e:
+            try:
+                from rich.console import Console
+                from rich.traceback import Traceback
+                Console().print(Traceback())
+            except ImportError:
+                print_error(f"Unexpected error: {e}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     try:
