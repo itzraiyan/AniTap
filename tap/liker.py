@@ -1,16 +1,12 @@
 """
 tap/liker.py
 
-Implements AniTap's mass-like logic and all modes:
-- Global Mode: Like all global activities
-- Following Mode: Like activities from users you follow
-- Profile Mode: Like all posts on a specific profile
-- Human-Like Random Mode: Like activities randomly from global, following, or profiles, with random breaks/delays
-
-Handles:
-- Progress bar, rate limit spinner, skipping already-liked posts
-- Failed actions saved for retry
-- Summary after each operation
+Flexible AniList Liker Logic:
+- Interactive CLI: asks user for how many posts to like (or unlimited), number of users from following (or all), and profiles.
+- Liking Modes: global, following (pick users), profile (pick one or multiple).
+- Human-like mode: random delays, breaks, source switching.
+- Never likes already-liked posts.
+- Shows clean boxed summary with stats.
 """
 
 import time
@@ -19,6 +15,7 @@ from ui.prompts import (
     print_info, print_success, print_error, print_warning,
     confirm_boxed, menu_boxed, prompt_boxed, print_progress_bar
 )
+from ui.colors import boxed_text
 from anilist.api import (
     fetch_global_activities, fetch_following_activities, fetch_profile_activities,
     like_activity, get_viewer_info, get_user_id
@@ -26,40 +23,91 @@ from anilist.api import (
 from config.config import (
     add_failed_action, clear_failed_actions, get_failed_actions, save_config, load_config
 )
-from tap.summary import show_summary, save_failed_for_retry, retry_failed_actions
 
-def like_activities(activities, token, config, desc="Liking", dry_run=False):
-    speed = config.get("liking_speed", "medium")
-    delays = {"fast": 0.5, "medium": 1.5, "slow": 3.0}
-    delay = delays.get(speed, 1.5)
+def ask_for_limit(prompt, default=None):
+    while True:
+        val = prompt_boxed(prompt, default=default, color="MAGENTA")
+        if val.lower() in ("unlimited", "inf", "forever"):
+            return None
+        try:
+            num = int(val)
+            if num < 1:
+                print_warning("Please enter a positive integer or 'unlimited'.")
+                continue
+            return num
+        except ValueError:
+            print_warning("Please enter a number or 'unlimited'.")
 
-    total = len(activities)
+def ask_for_usernames(prompt, allow_all=True):
+    val = prompt_boxed(prompt, color="MAGENTA")
+    if allow_all and val.strip().lower() in ("all", "everybody", "everyone"):
+        return None
+    names = [u.strip() for u in val.split(",") if u.strip()]
+    return names if names else None
+
+def show_summary(mode, total, liked, skipped, failed):
+    summary = (
+        f"Mode: {mode}\n"
+        f"Total posts processed: {total}\n"
+        f"Liked: {liked}\n"
+        f"Skipped (already liked): {skipped}\n"
+        f"Failed: {failed}"
+    )
+    print(boxed_text(summary, "CYAN"))
+
+def fetch_all_activities(fetch_func, token, limit=None):
+    # Fetches activities across all available pages, up to the limit
+    activities = []
+    page = 1
+    per_page = 30
+    while True:
+        acts = fetch_func(token, page=page, per_page=per_page)
+        if not acts:
+            break
+        activities.extend(acts)
+        if limit and len(activities) >= limit:
+            activities = activities[:limit]
+            break
+        if len(acts) < per_page:
+            break
+        page += 1
+    return activities
+
+def like_activities(activities, token, config, human_like=False):
     liked = skipped = failed = 0
     failed_ids = []
-
-    if total == 0:
-        print_warning("No activities found to process.")
-        return total, liked, skipped, failed, failed_ids
-
-    bar = print_progress_bar(activities, desc)
+    total = len(activities)
+    bar = print_progress_bar(activities, "Liking Activities")
     for act in bar:
         try:
             actid = act["id"]
             if act.get("isLiked", False):
                 skipped += 1
                 continue
-            if not dry_run:
-                ok = like_activity(actid, token)
-                if ok:
-                    liked += 1
-                else:
-                    failed += 1
-                    failed_ids.append(actid)
-                    add_failed_action(config, actid)
-            else:
-                print_info(f"[Dry Run] Would like activity {actid}")
+            ok = like_activity(actid, token)
+            if ok:
                 liked += 1
-            time.sleep(delay)
+            else:
+                failed += 1
+                failed_ids.append(actid)
+                add_failed_action(config, actid)
+            # Human-like delays
+            if human_like:
+                # 80% short, 15% long, 5% very long
+                r = random.random()
+                if r < 0.80:
+                    delay = random.uniform(4, 18)
+                elif r < 0.95:
+                    delay = random.uniform(30, 120)
+                else:
+                    delay = random.uniform(600, 1800)  # 10-30 min
+                print_info(f"Waiting {int(delay)} seconds (human-like)...")
+                time.sleep(delay)
+            else:
+                # Standard delay
+                speed = config.get("liking_speed", "medium")
+                delays = {"fast": 0.5, "medium": 1.5, "slow": 3.0}
+                time.sleep(delays.get(speed, 1.5))
         except KeyboardInterrupt:
             print_warning("Interrupted by user! Saving progress and failed actions.")
             break
@@ -68,154 +116,119 @@ def like_activities(activities, token, config, desc="Liking", dry_run=False):
             failed += 1
             failed_ids.append(actid)
             add_failed_action(config, actid)
-
-    print_success(f"Done! Total: {total}, Liked: {liked}, Skipped: {skipped}, Failed: {failed}")
     return total, liked, skipped, failed, failed_ids
 
-def like_global(config):
+def like_global(config, human_like=False):
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
+    limit = ask_for_limit("How many global posts to like? (Enter number or 'unlimited')", default="100")
     print_info("Fetching global activities...")
-    acts = fetch_global_activities(token)
-    total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, desc="Global Liking")
+    acts = fetch_all_activities(fetch_global_activities, token, limit)
+    total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
     show_summary("Global", total, liked, skipped, failed)
-    save_failed_for_retry(config, failed_ids)
-    if failed_ids:
-        retry_failed_actions(config, token)
 
-def like_following(config):
+def like_following(config, human_like=False):
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-    print_info("Fetching activities from users you follow...")
-    acts = fetch_following_activities(token)
-    total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, desc="Following Liking")
+    num_users = ask_for_limit("How many users from your following list to pick? (Enter number or 'all')", default="10")
+    print_info("Fetching your following list...")
+    # For demonstration, let's assume a function exists:
+    # following_user_ids = get_following_user_ids(token)
+    # For now, just fetch activities and filter by user
+    acts = fetch_all_activities(fetch_following_activities, token)
+    # Optionally filter by num_users
+    if num_users:
+        # Get unique user IDs
+        user_ids = []
+        for act in acts:
+            uid = act.get("userId")
+            if uid and uid not in user_ids:
+                user_ids.append(uid)
+            if len(user_ids) >= num_users:
+                break
+        acts = [a for a in acts if a.get("userId") in user_ids]
+    limit = ask_for_limit("How many posts to like from your following list? (Enter number or 'unlimited')", default="100")
+    if limit:
+        acts = acts[:limit]
+    total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
     show_summary("Following", total, liked, skipped, failed)
-    save_failed_for_retry(config, failed_ids)
-    if failed_ids:
-        retry_failed_actions(config, token)
 
-def like_profile(config):
+def like_profile(config, human_like=False):
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-    username_or_url = prompt_boxed(
-        "Enter AniList username or profile URL (type '-help' for info):",
-        color="CYAN",
-        helpmsg="You can enter either an AniList username or a full profile URL (e.g., https://anilist.co/user/YourName/)."
-    )
-    # Extract username from URL if needed
-    if "/" in username_or_url and "anilist.co/user/" in username_or_url:
-        username = username_or_url.strip().split("anilist.co/user/")[-1].split("/")[0]
-    else:
-        username = username_or_url.strip()
-    try:
-        user_id = get_user_id(username)
-    except Exception as e:
-        print_error(f"Could not find user '{username}': {e}")
-        return
-    print_info(f"Fetching activities from profile '{username}' (ID: {user_id})...")
-    acts = fetch_profile_activities(token, user_id)
-    total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, desc=f"Liking {username}'s posts")
-    show_summary(f"Profile: {username}", total, liked, skipped, failed)
-    save_failed_for_retry(config, failed_ids)
-    if failed_ids:
-        retry_failed_actions(config, token)
-
-def ask_profile_list():
-    print_info("To humanize, you may want to provide a list of AniList usernames whose activities may be liked at random.")
-    usernames_raw = prompt_boxed(
-        "Enter comma-separated AniList usernames (e.g. user1,user2,user3), or leave blank for none:",
-        color="MAGENTA"
-    )
-    if not usernames_raw.strip():
-        return []
-    return [u.strip() for u in usernames_raw.split(",") if u.strip()]
+    usernames = ask_for_usernames("Enter one or more AniList usernames (comma-separated) to like all posts from:")
+    limit = ask_for_limit("How many posts to like per profile? (Enter number or 'unlimited')", default="100")
+    for username in usernames or []:
+        try:
+            user_id = get_user_id(username)
+            print_info(f"Fetching activities from profile '{username}' (ID: {user_id})...")
+            acts = fetch_all_activities(lambda t, page, per_page: fetch_profile_activities(t, user_id, page=page, per_page=per_page), token, limit)
+            total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
+            show_summary(f"Profile: {username}", total, liked, skipped, failed)
+        except Exception as e:
+            print_error(f"Could not process user '{username}': {e}")
 
 def human_like_liker(config):
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-
-    # Ask for profile list once per session
-    profile_list = ask_profile_list()
     print_info("Starting Human-Like Random Liker Mode...\nAniTap will randomly like activities across global, following, and provided profiles, with human-like breaks.")
 
-    sources = ["global", "following", "profile"]
+    # Ask for profile list for randomness
+    profile_list = ask_for_usernames("Enter comma-separated AniList usernames for human-like mode (or leave blank):", allow_all=False)
+    limit = ask_for_limit("How many posts to like this session? (Enter number or 'unlimited')", default="100")
     session_likes = 0
 
+    sources = ["global", "following", "profile"]
+
     while True:
-        # Randomly choose source
-        src = random.choice(sources if profile_list else ["global", "following"])
+        src = random.choice([s for s in sources if (s != "profile" or profile_list)])
         if src == "global":
-            acts = fetch_global_activities(token)
+            acts = fetch_all_activities(fetch_global_activities, token)
             source_name = "Global"
         elif src == "following":
-            acts = fetch_following_activities(token)
+            acts = fetch_all_activities(fetch_following_activities, token)
             source_name = "Following"
         else:
-            if not profile_list:
-                print_warning("No profile list provided. Skipping profile mode.")
-                continue
             prof = random.choice(profile_list)
-            try:
-                user_id = get_user_id(prof)
-                acts = fetch_profile_activities(token, user_id)
-                source_name = f"Profile ({prof})"
-            except Exception as e:
-                print_error(f"Could not fetch activities for profile '{prof}': {e}")
-                continue
-
-        # Shuffle and pick a random subset of activities
-        if not acts:
-            print_warning(f"No activities found for source {source_name}. Skipping.")
-            continue
+            user_id = get_user_id(prof)
+            acts = fetch_all_activities(lambda t, page, per_page: fetch_profile_activities(t, user_id, page=page, per_page=per_page), token)
+            source_name = f"Profile ({prof})"
 
         random.shuffle(acts)
-        max_batch = random.randint(2, min(10, len(acts)))
-        acts_to_like = random.sample(acts, max_batch)
-        print_info(f"Liking {max_batch} activities from {source_name}...")
+        batch_size = random.randint(10, 30)
+        acts_to_like = []
+        for act in acts:
+            if not act.get("isLiked", False):
+                acts_to_like.append(act)
+                if len(acts_to_like) >= batch_size:
+                    break
+        # Enforce session limit
+        if limit is not None and session_likes + len(acts_to_like) > limit:
+            acts_to_like = acts_to_like[:limit - session_likes]
+        if not acts_to_like:
+            continue
+        print_info(f"Liking {len(acts_to_like)} activities from {source_name}...")
+        total, liked, skipped, failed, failed_ids = like_activities(acts_to_like, token, config, human_like=True)
+        session_likes += liked
 
-        # Like with random skip rate and random delay
-        for act in acts_to_like:
-            # Random skip: sometimes don't like
-            if random.random() < 0.15:
-                print_info(f"Skipping activity {act['id']} for extra humanization.")
-                continue
-            ok = like_activity(act['id'], token)
-            if ok:
-                print_success(f"Liked activity {act['id']} from {source_name}.")
-                session_likes += 1
-            else:
-                print_error(f"Failed to like activity {act['id']}.")
-                add_failed_action(config, act['id'])
-            # Random delay between likes (sometimes short, sometimes long)
-            delay = random.choice([
-                random.uniform(7, 22),    # Fast/typical
-                random.uniform(30, 120),  # "Thinking"
-                random.uniform(300, 1200) # Occasional long break
-            ])
-            print_info(f"Waiting {int(delay)} seconds before next action...")
-            time.sleep(delay)
-
-        # After a random batch, possibly take a "break"
+        show_summary(f"Human-like: {source_name}", total, liked, skipped, failed)
+        # Random break
         if random.random() < 0.35:
             break_time = random.choice([60, 180, 900, 1800, 3600])  # 1 min, 3 min, 15 min, 30 min, 1 hr
             msg = f"AniTap is taking a human-like break for {break_time//60} minutes..."
             print_warning(msg)
             time.sleep(break_time)
 
-        # Random session termination (simulate human leaving)
-        if session_likes >= random.randint(30, 120):
-            print_info(f"Session complete! Total likes this session: {session_likes}")
+        if limit is not None and session_likes >= limit:
+            print_success(f"Session complete! Total likes this session: {session_likes}")
             break
 
     print_success(f"Human-Like Random Liker Mode finished! Total likes: {session_likes}.")
-    failed_ids = get_failed_actions(config)
-    if failed_ids:
-        retry_failed_actions(config, token)
