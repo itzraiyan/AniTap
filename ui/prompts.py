@@ -15,9 +15,6 @@ def prompt_boxed(msg, default=None, color="MAGENTA", width=60, helpmsg=None):
             return val
 
 def menu_boxed(title, options, helpmsg=None, width=60):
-    """
-    Presents a boxed menu and returns the 1-based index of selected option.
-    """
     menu = f"{title}\n"
     for i, opt in enumerate(options, 1):
         menu += f"  {i}. {opt}\n"
@@ -38,11 +35,26 @@ def confirm_boxed(msg, color="YELLOW", width=60):
     return ans == 'y'
 
 def print_progress_bar(iterable, desc):
+    """
+    Wraps tqdm progress bar, making sure to handle interruptions and clean up.
+    If tqdm not available, returns iterable as-is.
+    """
     try:
         from tqdm import tqdm
-        return tqdm(iterable, desc=desc, unit="item")
+        return tqdm(iterable, desc=desc, unit="item", leave=False)
     except ImportError:
         return iterable
+
+def close_progress_bar(bar):
+    """
+    Closes tqdm bar if available.
+    """
+    try:
+        from tqdm import tqdm
+        if hasattr(bar, "close"):
+            bar.close()
+    except Exception:
+        pass
 
 print_info = print_info
 print_error = print_error
