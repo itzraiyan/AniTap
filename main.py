@@ -9,10 +9,10 @@ from anilist.auth import choose_account_flow
 from tap.liker import (
     like_global,
     like_following,
-    like_followers,      # <-- ADDED: Like posts from users who follow you
+    like_followers,
     like_profile,
     human_like_liker,
-    follow_random_users
+    follow_random_users      # <-- ADDED
 )
 
 def account_management(config):
@@ -53,7 +53,7 @@ def settings_menu(config):
                 print_warning("Invalid speed. Please enter fast, medium, or slow.")
         elif choice == 2:
             mode = prompt_boxed(
-                "Set default mode (global / following / followers / profile):",  # <-- ADDED "followers"
+                "Set default mode (global / following / followers / profile):",
                 default=config.get("default_mode", "global"),
                 color="CYAN",
                 helpmsg="Default mode determines which liking workflow starts by default."
@@ -85,10 +85,10 @@ def main():
             [
                 "Like posts globally (all global activities)",
                 "Like posts from users you follow",
-                "Like posts from users who follow you",        # <-- ADDED
-                "Like posts on a specific profile",            # <-- CHANGED (was 'all posts', now flexible)
+                "Like posts from users who follow you",
+                "Like posts on a specific profile",
                 "Human-like random liking (imitate real user)",
-                "Follow random users",
+                "Follow random users",           # <-- ADDED
                 "Account management (add/switch/remove)",
                 "Settings",
                 "Exit"
@@ -112,7 +112,7 @@ def main():
             print_outro()
             break
 
-        elif choice == 3:   # <-- NEW: Like posts from your followers
+        elif choice == 3:
             if not config.get("token"):
                 print_warning("No AniList account authenticated yet. Please add an account first!")
                 config = account_management(config)
