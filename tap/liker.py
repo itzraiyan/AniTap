@@ -134,6 +134,12 @@ def like_global(config, human_like=False):
     total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
     show_summary("Global", total, liked, skipped, failed)
 
+def like_following(config, human_like=False):
+    like_following_or_followers(config, mode="following", human_like=human_like)
+
+def like_followers(config, human_like=False):
+    like_following_or_followers(config, mode="followers", human_like=human_like)
+
 def like_following_or_followers(config, mode="following", human_like=False):
     token = config.get("token")
     if not token:
