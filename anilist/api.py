@@ -3,8 +3,9 @@ anilist/api.py
 
 Handles all AniList GraphQL API queries and mutations:
 - User lookup
-- Fetching activities (global/following/profile) with proper fragments
-- Liking activities
+- Fetching activities (global/following/profile/followers)
+- Like activity mutation
+- Get following/follower user IDs
 - Viewer info for token/account verification
 
 Depends on: anilist/auth.py, anilist/ratelimit.py
@@ -31,6 +32,9 @@ def get_user_id(username):
     raise Exception(f"Unable to find AniList user '{username}'.")
 
 def get_viewer_info(token):
+    """
+    Returns dict { "id": ..., "username": ... } for authenticated user.
+    """
     query = '''
     query { Viewer { id name } }
     '''
@@ -42,6 +46,8 @@ def get_viewer_info(token):
     return None
 
 def fetch_activities(mode, token, user_id=None, page=1, per_page=30):
+    # Fetches activities for global, following, profile, followers
+    # Uses proper fragments
     if mode == "PROFILE":
         query = '''
         query ($page: Int, $perPage: Int, $userId: Int) {
@@ -75,6 +81,7 @@ def fetch_activities(mode, token, user_id=None, page=1, per_page=30):
         '''
         variables = {"page": page, "perPage": per_page, "userId": user_id}
     else:
+        # GLOBAL, FOLLOWING, FOLLOWERS do not declare $userId
         query = '''
         query ($page: Int, $perPage: Int) {
           Page(page: $page, perPage: $perPage) {
@@ -168,6 +175,24 @@ def get_following_user_ids(token):
         return [u["id"] for u in users]
     return []
 
+def get_follower_user_ids(token):
+    query = '''
+    query {
+      Viewer {
+        followers(sort: ID_DESC) {
+          id
+        }
+      }
+    }
+    '''
+    headers = { "Authorization": f"Bearer {token}" }
+    resp = requests.post(ANILIST_API, json={"query": query}, headers=headers)
+    if resp.status_code == 200:
+        users = resp.json()["data"]["Viewer"]["followers"]
+        return [u["id"] for u in users]
+    return []
+
+# Optionally, add follow_user and search_users for the follow feature
 def follow_user(user_id, token):
     mutation = '''
     mutation ($userId: Int) {
@@ -185,8 +210,8 @@ def follow_user(user_id, token):
     return False
 
 def search_users(token, num_to_fetch=100):
-    # Search for users with common anime/manga interests.
-    # For demonstration, just fetch users with a popular anime/manga in their list.
+    # This is a placeholder. AniList doesn't provide a public global user search, so you may want to use other heuristics.
+    # Here, just fetch first N users from Page.
     query = '''
     query ($page: Int, $perPage: Int) {
       Page(page: $page, perPage: $perPage) {
