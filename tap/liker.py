@@ -7,7 +7,7 @@ Flexible AniList Liker Logic:
 - Human-like mode: random delays, breaks, source switching.
 - Never likes already-liked posts.
 - Shows clean boxed summary with stats.
-- Follow random users functionality.
+- *NEW*: Follow random users functionality.
 """
 
 import time
@@ -67,10 +67,13 @@ def show_summary(mode, total, liked, skipped, failed):
     print(boxed_text(summary, "CYAN"))
 
 def fetch_all_activities(fetch_func, token, user_id=None, limit=None, filter_unliked=False):
+    """
+    Paginate through ALL activities for the user/global/etc.
+    If filter_unliked=True, only return activities not already liked.
+    """
     activities = []
     page = 1
     per_page = 30
-    fetched = 0
     while True:
         if user_id is not None:
             acts = fetch_func(token, user_id, page=page, per_page=per_page)
@@ -81,8 +84,6 @@ def fetch_all_activities(fetch_func, token, user_id=None, limit=None, filter_unl
         if filter_unliked:
             acts = [a for a in acts if not a.get("isLiked", False)]
         activities.extend(acts)
-        fetched += len(acts)
-        # Only count unliked if filter_unliked
         if limit is not None and len(activities) >= limit:
             activities = activities[:limit]
             break
@@ -92,7 +93,10 @@ def fetch_all_activities(fetch_func, token, user_id=None, limit=None, filter_unl
     return activities
 
 def like_activities(activities, token, config, human_like=False):
-    # Only activities not already liked should be passed here!
+    """
+    Only activities not already liked should be passed here!
+    Progress bar now reflects only actionable activities.
+    """
     liked = skipped = failed = 0
     failed_ids = []
     total = len(activities)
@@ -210,10 +214,13 @@ def like_profile(config, human_like=False):
         try:
             user_id = get_user_id(username)
             print_info(f"Fetching activities from profile '{username}' (ID: {user_id})...")
-            acts = fetch_all_activities(fetch_profile_activities, token, user_id, limit, filter_unliked=True)
+            acts = fetch_all_activities(fetch_profile_activities, token, user_id, None, filter_unliked=True)
             if not acts:
                 print_warning(f"No unliked activities found for user '{username}'.")
                 continue
+            # Apply final limit after fetching all unliked activities
+            acts = acts[:limit] if limit is not None else acts
+            # Progress bar now shows only unliked activities
             total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
             show_summary(f"Profile: {username}", total, liked, skipped, failed)
         except Exception as e:
@@ -258,7 +265,7 @@ def human_like_liker(config):
             acts = []
             source_name = ""
             if src == "global":
-                acts = fetch_all_activities(fetch_global_activities, token, filter_unliked=True)
+                acts = fetch_all_activities(fetch_global_activities, token, None, None, filter_unliked=True)
                 source_name = "Global"
             elif src == "following":
                 user_list = get_following_user_ids(token)
@@ -266,7 +273,7 @@ def human_like_liker(config):
                     print_warning("You are not following anyone! Skipping following mode.")
                     continue
                 uid = random.choice(user_list)
-                acts = fetch_all_activities(fetch_profile_activities, token, uid, filter_unliked=True)
+                acts = fetch_all_activities(fetch_profile_activities, token, uid, None, filter_unliked=True)
                 source_name = f"Following ({uid})"
             elif src == "followers":
                 user_list = get_follower_user_ids(token)
@@ -274,14 +281,14 @@ def human_like_liker(config):
                     print_warning("You have no followers! Skipping followers mode.")
                     continue
                 uid = random.choice(user_list)
-                acts = fetch_all_activities(fetch_profile_activities, token, uid, filter_unliked=True)
+                acts = fetch_all_activities(fetch_profile_activities, token, uid, None, filter_unliked=True)
                 source_name = f"Follower ({uid})"
             else:  # profile
                 if not profile_list:
                     continue
                 prof = random.choice(profile_list)
                 user_id = get_user_id(prof)
-                acts = fetch_all_activities(fetch_profile_activities, token, user_id, filter_unliked=True)
+                acts = fetch_all_activities(fetch_profile_activities, token, user_id, None, filter_unliked=True)
                 source_name = f"Profile ({prof})"
 
             if not acts:
@@ -332,7 +339,7 @@ def human_like_liker(config):
 
 def follow_random_users(config):
     """
-    Follows random users on AniList.
+    Follows random users on AniList. Now fetches many pages of global activities for broader user pool.
     """
     token = config.get("token")
     if not token:
@@ -340,13 +347,25 @@ def follow_random_users(config):
         return
 
     count = ask_for_limit("How many random users do you want to follow? (Enter number or 'unlimited')", default="10")
-    print_info("Fetching global activities to find potential users to follow...")
-    activities = fetch_all_activities(fetch_global_activities, token, None, count * 2 if count else 200)
+    print_info("Fetching global activities from multiple pages to find potential users to follow...")
+    desired_user_count = count * 3 if count else 100
     user_ids = set()
-    for act in activities:
-        uid = act.get("user", {}).get("id") or act.get("userId") or act.get("user_id")
-        if uid:
-            user_ids.add(uid)
+    max_pages = 10
+    page = 1
+    while len(user_ids) < desired_user_count and page <= max_pages:
+        acts = fetch_global_activities(token, page=page, per_page=30)
+        for act in acts:
+            uid = None
+            # Try several possible user id fields
+            if "user" in act and isinstance(act["user"], dict):
+                uid = act["user"].get("id")
+            uid = uid or act.get("userId") or act.get("user_id")
+            if uid:
+                user_ids.add(uid)
+        if not acts or len(acts) < 30:
+            break
+        page += 1
+
     try:
         viewer = get_viewer_info(token)
         self_id = viewer["id"]
@@ -358,8 +377,11 @@ def follow_random_users(config):
     if not user_ids:
         print_warning("Could not find any users to follow.")
         return
+
+    # Shuffle and pick random users
+    random.shuffle(user_ids)
     if count is not None and count < len(user_ids):
-        user_ids = random.sample(user_ids, count)
+        user_ids = user_ids[:count]
     else:
         user_ids = user_ids[:count] if count else user_ids
 
