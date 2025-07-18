@@ -3,11 +3,12 @@ tap/liker.py
 
 Flexible AniList Liker Logic:
 - Interactive CLI: asks user for how many posts to like (or unlimited), number of users from following/followers (or all), and profiles.
-- Liking Modes: global, following, followers, profile (pick one or multiple).
+- Liking Modes: global, following, followers, profile, chain (see below).
 - Human-like mode: random delays, breaks, source switching.
 - Never likes already-liked posts.
 - Shows clean boxed summary with stats.
 - *NEW*: Follow random users functionality.
+- *NEW*: Chain system: like activities from your followings' followings' followers, etc.
 """
 
 import time
@@ -66,10 +67,12 @@ def show_summary(mode, total, liked, skipped, failed):
     )
     print(boxed_text(summary, "CYAN"))
 
-def fetch_all_activities(fetch_func, token, user_id=None, limit=None, filter_unliked=False):
+def fetch_all_activities_until_limit(fetch_func, token, user_id=None, required=None, filter_unliked=False):
     """
-    Paginate through ALL activities for the user/global/etc.
-    If filter_unliked=True, only return activities not already liked.
+    Paginate through activities, but stop as soon as we have enough unliked items.
+
+    If required is None: fetch all activities (unlimited).
+    If filter_unliked=True: only return activities not already liked.
     """
     activities = []
     page = 1
@@ -83,13 +86,22 @@ def fetch_all_activities(fetch_func, token, user_id=None, limit=None, filter_unl
             break
         if filter_unliked:
             acts = [a for a in acts if not a.get("isLiked", False)]
-        activities.extend(acts)
-        if limit is not None and len(activities) >= limit:
-            activities = activities[:limit]
-            break
+        if required is None:
+            activities.extend(acts)
+        else:
+            # If requirement set, only collect enough unliked activities
+            remaining = required - len(activities)
+            if remaining <= 0:
+                break
+            if len(acts) >= remaining:
+                activities.extend(acts[:remaining])
+                break
+            activities.extend(acts)
         if len(acts) < per_page:
             break
         page += 1
+    if required is not None:
+        activities = activities[:required]
     return activities
 
 def like_activities(activities, token, config, human_like=False):
@@ -151,7 +163,7 @@ def like_global(config, human_like=False):
         return
     limit = ask_for_limit("How many global posts to like? (Enter number or 'unlimited')", default="100")
     print_info("Fetching global activities...")
-    acts = fetch_all_activities(fetch_global_activities, token, None, limit, filter_unliked=True)
+    acts = fetch_all_activities_until_limit(fetch_global_activities, token, None, limit, filter_unliked=True)
     if not acts:
         print_warning("No global activities found!")
         return
@@ -187,7 +199,7 @@ def like_following_or_followers(config, mode="following", human_like=False):
         user_list = random.sample(user_list, num_users)
     acts = []
     for uid in user_list:
-        acts.extend(fetch_all_activities(fetch_profile_activities, token, uid, filter_unliked=True))
+        acts.extend(fetch_all_activities_until_limit(fetch_profile_activities, token, uid, None, filter_unliked=True))
     if not acts:
         print_warning(f"No activities found for {mode} users!")
         return
@@ -214,17 +226,90 @@ def like_profile(config, human_like=False):
         try:
             user_id = get_user_id(username)
             print_info(f"Fetching activities from profile '{username}' (ID: {user_id})...")
-            acts = fetch_all_activities(fetch_profile_activities, token, user_id, None, filter_unliked=True)
+            acts = fetch_all_activities_until_limit(fetch_profile_activities, token, user_id, limit, filter_unliked=True)
             if not acts:
                 print_warning(f"No unliked activities found for user '{username}'.")
                 continue
-            # Apply final limit after fetching all unliked activities
-            acts = acts[:limit] if limit is not None else acts
-            # Progress bar now shows only unliked activities
             total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
             show_summary(f"Profile: {username}", total, liked, skipped, failed)
         except Exception as e:
             print_error(f"Could not process user '{username}': {e}")
+
+def chain_user_ids(token, chain_length=3, branch_width=5):
+    """
+    Chain system: get your followings, then recursively their followings/followers, etc.
+    branch_width: sample N users from each level.
+    Returns a list of user IDs, de-duplicated, excluding self.
+    """
+    try:
+        viewer = get_viewer_info(token)
+        self_id = viewer["id"]
+    except Exception:
+        self_id = None
+
+    visited = set()
+    current_ids = set(get_following_user_ids(token))
+    for depth in range(chain_length):
+        next_ids = set()
+        for uid in random.sample(list(current_ids), min(branch_width, len(current_ids))):
+            if uid in visited or uid == self_id:
+                continue
+            visited.add(uid)
+            # Get followings and followers of this user
+            try:
+                # These functions require token, but for other users we need to fetch by user_id (API adjustment may be needed)
+                # Fallback: fetch profile activities and harvest user IDs from them
+                acts = fetch_all_activities_until_limit(fetch_profile_activities, token, uid, None, filter_unliked=False)
+                for act in acts:
+                    u = None
+                    if "user" in act and isinstance(act["user"], dict):
+                        u = act["user"].get("id")
+                    u = u or act.get("userId") or act.get("user_id")
+                    if u and u != self_id:
+                        next_ids.add(u)
+            except Exception:
+                continue
+        current_ids = next_ids
+        if not current_ids:
+            break
+    all_ids = list(visited | current_ids)
+    if self_id is not None:
+        all_ids = [uid for uid in all_ids if uid != self_id]
+    return all_ids
+
+def like_chain(config):
+    """
+    Chain system: like activities from users found by chaining followings/followers.
+    """
+    token = config.get("token")
+    if not token:
+        print_error("No AniList token found! Please authenticate in Account Management.")
+        return
+    chain_length = ask_for_limit("Chain depth (how many levels to go, e.g. 2-4 recommended)?", default=3)
+    branch_width = ask_for_limit("Branch width (how many users to sample per level)?", default=5)
+    limit = ask_for_limit("How many posts to like in total? (Enter number or 'unlimited')", default="50")
+    print_info("Building user chain...")
+    user_ids = chain_user_ids(token, chain_length=chain_length, branch_width=branch_width)
+    if not user_ids:
+        print_warning("Could not find any users in chain.")
+        return
+    print_info(f"Found {len(user_ids)} users in chain. Fetching activities...")
+    acts = []
+    required = limit
+    for uid in random.sample(user_ids, min(len(user_ids), branch_width*chain_length)):
+        needed = required - len(acts) if required is not None else None
+        if needed == 0:
+            break
+        acts_part = fetch_all_activities_until_limit(fetch_profile_activities, token, uid, needed, filter_unliked=True)
+        acts.extend(acts_part)
+        if required is not None and len(acts) >= required:
+            acts = acts[:required]
+            break
+    if not acts:
+        print_warning("No unliked activities found in chain.")
+        return
+    total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=True)
+    show_summary("Chain", total, liked, skipped, failed)
 
 def human_like_liker(config):
     token = config.get("token")
@@ -265,7 +350,7 @@ def human_like_liker(config):
             acts = []
             source_name = ""
             if src == "global":
-                acts = fetch_all_activities(fetch_global_activities, token, None, None, filter_unliked=True)
+                acts = fetch_all_activities_until_limit(fetch_global_activities, token, None, None, filter_unliked=True)
                 source_name = "Global"
             elif src == "following":
                 user_list = get_following_user_ids(token)
@@ -273,7 +358,7 @@ def human_like_liker(config):
                     print_warning("You are not following anyone! Skipping following mode.")
                     continue
                 uid = random.choice(user_list)
-                acts = fetch_all_activities(fetch_profile_activities, token, uid, None, filter_unliked=True)
+                acts = fetch_all_activities_until_limit(fetch_profile_activities, token, uid, None, filter_unliked=True)
                 source_name = f"Following ({uid})"
             elif src == "followers":
                 user_list = get_follower_user_ids(token)
@@ -281,14 +366,14 @@ def human_like_liker(config):
                     print_warning("You have no followers! Skipping followers mode.")
                     continue
                 uid = random.choice(user_list)
-                acts = fetch_all_activities(fetch_profile_activities, token, uid, None, filter_unliked=True)
+                acts = fetch_all_activities_until_limit(fetch_profile_activities, token, uid, None, filter_unliked=True)
                 source_name = f"Follower ({uid})"
             else:  # profile
                 if not profile_list:
                     continue
                 prof = random.choice(profile_list)
                 user_id = get_user_id(prof)
-                acts = fetch_all_activities(fetch_profile_activities, token, user_id, None, filter_unliked=True)
+                acts = fetch_all_activities_until_limit(fetch_profile_activities, token, user_id, None, filter_unliked=True)
                 source_name = f"Profile ({prof})"
 
             if not acts:
