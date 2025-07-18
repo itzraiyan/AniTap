@@ -4,14 +4,13 @@ AniTap - AniList Mass-Liker CLI Tool
 
 Entry point: Shows anime-themed banners, inspirational quotes, and a boxed main menu.
 Routes to liking workflows: Global, Following, Profile, Human-Like Random, Account Management, Settings, Exit.
-
 All UI uses boxed, colored output. All prompts support -help for beginner friendliness.
 """
 
 import sys
 import os
 from ui.banners import print_banner, print_outro, print_random_quote
-from ui.prompts import menu_boxed, print_info, print_success, print_error, print_warning, prompt_boxed  # <-- FIXED IMPORT
+from ui.prompts import menu_boxed, print_info, print_success, print_error, print_warning, prompt_boxed
 from ui.helptext import TOOL_OVERVIEW, MAIN_MENU_HELP, SETTINGS_HELP
 from config.config import load_config, save_config
 from anilist.auth import choose_account_flow
@@ -98,7 +97,7 @@ def main():
 
         if choice == 1:
             if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")  # <-- FIXED
+                print_warning("No AniList account authenticated yet. Please add an account first!")
                 config = account_management(config)
             like_global(config)
             print_outro()
@@ -106,7 +105,7 @@ def main():
 
         elif choice == 2:
             if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")  # <-- FIXED
+                print_warning("No AniList account authenticated yet. Please add an account first!")
                 config = account_management(config)
             like_following(config)
             print_outro()
@@ -114,7 +113,7 @@ def main():
 
         elif choice == 3:
             if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")  # <-- FIXED
+                print_warning("No AniList account authenticated yet. Please add an account first!")
                 config = account_management(config)
             like_profile(config)
             print_outro()
@@ -122,7 +121,7 @@ def main():
 
         elif choice == 4:
             if not config.get("token"):
-                print_warning("No AniList account authenticated yet. Please add an account first!")  # <-- FIXED
+                print_warning("No AniList account authenticated yet. Please add an account first!")
                 config = account_management(config)
             human_like_liker(config)
             print_outro()
