@@ -41,14 +41,7 @@ def get_viewer_info(token):
         return {"id": viewer["id"], "username": viewer["name"]}
     return None
 
-# --------- Activities Fetch (FIXED) ---------
-def fetch_activities(mode, token, user_id=None, page=1, per_page=25):
-    """
-    Fetches activities (global/following/profile)
-    mode: "GLOBAL", "FOLLOWING", "PROFILE"
-    user_id: required for PROFILE
-    """
-    # Select the correct query and variables based on mode
+def fetch_activities(mode, token, user_id=None, page=1, per_page=30):
     if mode == "PROFILE":
         query = '''
         query ($page: Int, $perPage: Int, $userId: Int) {
@@ -82,7 +75,6 @@ def fetch_activities(mode, token, user_id=None, page=1, per_page=25):
         '''
         variables = {"page": page, "perPage": per_page, "userId": user_id}
     else:
-        # GLOBAL and FOLLOWING do not declare $userId
         query = '''
         query ($page: Int, $perPage: Int) {
           Page(page: $page, perPage: $perPage) {
@@ -118,40 +110,29 @@ def fetch_activities(mode, token, user_id=None, page=1, per_page=25):
     if token:
         headers['Authorization'] = f'Bearer {token}'
 
-    activities = []
-    while True:
-        resp = requests.post(ANILIST_API, json={'query': query, 'variables': variables}, headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            page_data = data["data"]["Page"]
-            acts = page_data["activities"]
-            activities.extend(acts)
-            # Pagination: check if more pages
-            # (If you want to support pagination, you should check pageInfo.hasNextPage, but most clients just grab the first page)
-            break
+    resp = requests.post(ANILIST_API, json={'query': query, 'variables': variables}, headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        page_data = data["data"]["Page"]
+        acts = page_data["activities"]
+        return acts
+    else:
+        handled = handle_rate_limit(resp)
+        if handled:
+            return []
         else:
-            handled = handle_rate_limit(resp)
-            if handled:
-                continue
-            else:
-                raise Exception(f"Failed to fetch activities (mode={mode}): HTTP {resp.status_code}\n{resp.text}")
-    return activities
+            raise Exception(f"Failed to fetch activities (mode={mode}): HTTP {resp.status_code}\n{resp.text}")
 
-def fetch_global_activities(token):
-    # Uses GLOBAL mode, no userId
-    return fetch_activities("GLOBAL", token, None)
+def fetch_global_activities(token, page=1, per_page=30):
+    return fetch_activities("GLOBAL", token, None, page=page, per_page=per_page)
 
-def fetch_following_activities(token):
-    # Uses FOLLOWING mode, no userId
-    return fetch_activities("FOLLOWING", token, None)
+def fetch_following_activities(token, page=1, per_page=30):
+    return fetch_activities("FOLLOWING", token, None, page=page, per_page=per_page)
 
-def fetch_profile_activities(token, user_id):
-    return fetch_activities("PROFILE", token, user_id)
+def fetch_profile_activities(token, user_id, page=1, per_page=30):
+    return fetch_activities("PROFILE", token, user_id, page=page, per_page=per_page)
 
 def like_activity(activity_id, token):
-    """
-    Likes a single activity.
-    """
     mutation = '''
     mutation ($id: Int) {
       ToggleLikeV2(id: $id, type: ACTIVITY) {
@@ -161,11 +142,76 @@ def like_activity(activity_id, token):
     '''
     variables = { "id": activity_id }
     headers = { "Authorization": f"Bearer {token}" }
-    while True:
-        resp = requests.post(ANILIST_API, json={"query": mutation, "variables": variables}, headers=headers)
+    resp = requests.post(ANILIST_API, json={"query": mutation, "variables": variables}, headers=headers)
+    if resp.status_code == 200:
+        return True
+    else:
+        handled = handle_rate_limit(resp)
+        if not handled:
+            return False
+        return True
+
+def get_following_user_ids(token):
+    query = '''
+    query {
+      Viewer {
+        following(sort: ID_DESC) {
+          id
+        }
+      }
+    }
+    '''
+    headers = { "Authorization": f"Bearer {token}" }
+    resp = requests.post(ANILIST_API, json={"query": query}, headers=headers)
+    if resp.status_code == 200:
+        users = resp.json()["data"]["Viewer"]["following"]
+        return [u["id"] for u in users]
+    return []
+
+def follow_user(user_id, token):
+    mutation = '''
+    mutation ($userId: Int) {
+      FollowUser(userId: $userId) {
+        id
+        name
+      }
+    }
+    '''
+    variables = { "userId": user_id }
+    headers = { "Authorization": f"Bearer {token}" }
+    resp = requests.post(ANILIST_API, json={"query": mutation, "variables": variables}, headers=headers)
+    if resp.status_code == 200:
+        return True
+    return False
+
+def search_users(token, num_to_fetch=100):
+    # Search for users with common anime/manga interests.
+    # For demonstration, just fetch users with a popular anime/manga in their list.
+    query = '''
+    query ($page: Int, $perPage: Int) {
+      Page(page: $page, perPage: $perPage) {
+        users {
+          id
+          name
+        }
+      }
+    }
+    '''
+    users = []
+    page = 1
+    per_page = min(num_to_fetch, 50)
+    headers = { "Authorization": f"Bearer {token}" }
+    while len(users) < num_to_fetch:
+        resp = requests.post(ANILIST_API, json={"query": query, "variables": {"page": page, "perPage": per_page}}, headers=headers)
         if resp.status_code == 200:
-            return True
+            data = resp.json()
+            page_users = data["data"]["Page"]["users"]
+            if not page_users:
+                break
+            users.extend(page_users)
+            if len(page_users) < per_page:
+                break
+            page += 1
         else:
-            handled = handle_rate_limit(resp)
-            if not handled:
-                return False
+            break
+    return users[:num_to_fetch]
