@@ -12,8 +12,10 @@ from tap.liker import (
     like_followers,
     like_profile,
     human_like_liker,
-    follow_random_users
+    follow_random_users,
+    follow_chain_users
 )
+from tap.summary import retry_failed_actions
 
 def account_management(config):
     print_info("Account Management")
@@ -53,17 +55,17 @@ def settings_menu(config):
                 print_warning("Invalid speed. Please enter fast, medium, or slow.")
         elif choice == 2:
             mode = prompt_boxed(
-                "Set default mode (global / following / followers / profile):",
+                "Set default mode (global / following / profile):",
                 default=config.get("default_mode", "global"),
                 color="CYAN",
                 helpmsg="Default mode determines which liking workflow starts by default."
             ).lower()
-            if mode in ("global", "following", "followers", "profile"):
+            if mode in ("global", "following", "profile"):
                 config["default_mode"] = mode
                 save_config(config)
                 print_success(f"Default mode set to {mode}")
             else:
-                print_warning("Invalid mode. Please enter global, following, followers, or profile.")
+                print_warning("Invalid mode. Please enter global, following, or profile.")
         elif choice == 3:
             config["failed_actions"] = []
             save_config(config)
@@ -89,11 +91,17 @@ def main():
                 "Like posts on a specific profile",
                 "Human-like random liking (imitate real user)",
                 "Follow random users",
+                "Follow users via chain system",
+                "Retry failed like actions",
                 "Account management (add/switch/remove)",
                 "Settings",
                 "Exit"
             ],
-            helpmsg=MAIN_MENU_HELP + "\n5: Human-like mode randomly likes activities from different sources with random breaks/delays.\n6: Follow random users."
+            helpmsg=MAIN_MENU_HELP +
+            "\n5: Human-like mode randomly likes activities from different sources with random breaks/delays." +
+            "\n6: Follow random users." +
+            "\n7: Follow users via chain system." +
+            "\n8: Retry any failed likes from previous sessions."
         )
 
         try:
@@ -146,12 +154,26 @@ def main():
                 break
 
             elif choice == 7:
-                config = account_management(config)
+                if not config.get("token"):
+                    print_warning("No AniList account authenticated yet. Please add an account first!")
+                    config = account_management(config)
+                follow_chain_users(config)
+                print_outro()
+                break
 
             elif choice == 8:
-                settings_menu(config)
+                if not config.get("token"):
+                    print_warning("No AniList account authenticated yet. Please add an account first!")
+                    config = account_management(config)
+                retry_failed_actions(config, config.get("token"))
 
             elif choice == 9:
+                config = account_management(config)
+
+            elif choice == 10:
+                settings_menu(config)
+
+            elif choice == 11:
                 print_success("Thanks for using AniTap! See you next time, senpai!")
                 print_outro()
                 sys.exit(0)
