@@ -9,11 +9,8 @@ def prompt_boxed(msg, default=None, color="MAGENTA", width=60, helpmsg=None):
         if val.lower() == "-help" and helpmsg:
             print_info(helpmsg, width)
             continue
-        # Fix: Allow optional prompts (user presses Enter and no default means skip)
         if not val and default is not None:
             return default
-        if not val and default is None:
-            return ""  # Return empty string so caller can interpret as "skipped"
         if val:
             return val
 
