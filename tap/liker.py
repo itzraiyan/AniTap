@@ -200,28 +200,8 @@ def like_following(config, human_like=False):
     show_summary("Following", total, liked, skipped, failed)
 
 def like_followers(config, human_like=False):
-    token = config.get("token")
-    if not token:
-        print_error("No AniList token found! Please authenticate in Account Management.")
-        return
-    user_list = get_follower_user_ids(token)
-    if not user_list:
-        print_warning("You have no followers!")
-        return
-    num_users = ask_for_limit("How many users from your followers to pick? (Enter number or 'all')", default="10")
-    if num_users and num_users < len(user_list):
-        user_list = random.sample(user_list, num_users)
-    acts = []
-    for uid in user_list:
-        acts.extend(fetch_all_unliked_activities(fetch_profile_activities, token, uid))
-    if not acts:
-        print_warning("No activities found for follower users!")
-        return
-    limit = ask_for_limit("How many posts to like from your followers list? (Enter number or 'unlimited')", default="100")
-    if limit:
-        acts = acts[:limit]
-    total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
-    show_summary("Followers", total, liked, skipped, failed)
+    print_warning("AniList API does not support fetching your followers or other people's followers. This feature may be added in the future if possible.")
+    return
 
 def like_profile(config, human_like=False):
     token = config.get("token")
@@ -469,7 +449,7 @@ def human_like_liker(config):
     session_likes = 0
     session_start = time.time()
 
-    sources = ["global", "following", "followers"]
+    sources = ["global", "following"]
     if profile_list:
         sources.append("profile")
 
@@ -494,14 +474,6 @@ def human_like_liker(config):
                 uid = random.choice(user_list)
                 acts = fetch_all_unliked_activities(fetch_profile_activities, token, uid)
                 source_name = f"Following ({uid})"
-            elif src == "followers":
-                user_list = get_follower_user_ids(token)
-                if not user_list:
-                    print_warning("You have no followers! Skipping followers mode.")
-                    continue
-                uid = random.choice(user_list)
-                acts = fetch_all_unliked_activities(fetch_profile_activities, token, uid)
-                source_name = f"Follower ({uid})"
             else:  # profile
                 if not profile_list:
                     continue
