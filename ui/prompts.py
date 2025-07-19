@@ -9,8 +9,11 @@ def prompt_boxed(msg, default=None, color="MAGENTA", width=60, helpmsg=None):
         if val.lower() == "-help" and helpmsg:
             print_info(helpmsg, width)
             continue
+        # Accept 'all' and 'unlimited' everywhere
         if not val and default is not None:
             return default
+        if val.lower() in ("all", "unlimited", "inf", "forever"):
+            return None
         if val:
             return val
 
