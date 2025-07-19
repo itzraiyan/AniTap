@@ -10,15 +10,15 @@ from config.config import get_failed_actions, clear_failed_actions, save_config
 from ui.prompts import confirm_boxed
 
 def show_summary(mode, total, liked, skipped, failed):
-    msg = (
+    # Print a single clean summary box, never nested
+    summary = (
         f"Mode: {mode}\n"
         f"Total posts processed: {total}\n"
         f"Liked: {liked}\n"
         f"Skipped (already liked): {skipped}\n"
         f"Failed: {failed}"
     )
-    color = "GREEN" if failed == 0 else "YELLOW"
-    print_info(boxed_text(msg, color, 60))
+    print(boxed_text(summary, "CYAN"))
 
 def save_failed_for_retry(config, failed_ids):
     if failed_ids:
@@ -43,13 +43,12 @@ def retry_failed_actions(config, token):
                 retried += 1
             else:
                 still_failed.append(actid)
-        msg = (
+        summary = (
             f"Retried failed actions.\n"
             f"Successfully liked: {retried}\n"
             f"Still failed: {len(still_failed)}"
         )
-        color = "GREEN" if not still_failed else "YELLOW"
-        print_info(boxed_text(msg, color, 60))
+        print(boxed_text(summary, "CYAN"))
         config["failed_actions"] = still_failed
         save_config(config)
     else:
