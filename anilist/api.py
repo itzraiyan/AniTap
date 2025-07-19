@@ -340,4 +340,4 @@ def search_users(token, num_to_fetch=100):
             page += 1
         else:
             break
-    return users[:num_to_fetch
+    return users[:num_to_fetch]
