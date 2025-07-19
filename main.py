@@ -12,8 +12,7 @@ from tap.liker import (
     like_followers,
     like_profile,
     human_like_liker,
-    follow_random_users,
-    follow_chain_users
+    follow_random_users
 )
 
 def account_management(config):
@@ -90,12 +89,11 @@ def main():
                 "Like posts on a specific profile",
                 "Human-like random liking (imitate real user)",
                 "Follow random users",
-                "Follow random users (chain system)",
                 "Account management (add/switch/remove)",
                 "Settings",
                 "Exit"
             ],
-            helpmsg=MAIN_MENU_HELP + "\n5: Human-like mode randomly likes activities from different sources with random breaks/delays.\n6: Follow random users.\n7: Follow random users (chain system)."
+            helpmsg=MAIN_MENU_HELP + "\n5: Human-like mode randomly likes activities from different sources with random breaks/delays.\n6: Follow random users."
         )
 
         try:
@@ -148,20 +146,12 @@ def main():
                 break
 
             elif choice == 7:
-                if not config.get("token"):
-                    print_warning("No AniList account authenticated yet. Please add an account first!")
-                    config = account_management(config)
-                follow_chain_users(config)
-                print_outro()
-                break
-
-            elif choice == 8:
                 config = account_management(config)
 
-            elif choice == 9:
+            elif choice == 8:
                 settings_menu(config)
 
-            elif choice == 10:
+            elif choice == 9:
                 print_success("Thanks for using AniTap! See you next time, senpai!")
                 print_outro()
                 sys.exit(0)
