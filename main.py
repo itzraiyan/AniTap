@@ -12,7 +12,7 @@ from tap.liker import (
     like_followers,
     like_profile,
     human_like_liker,
-    follow_random_users
+    follow_chain_users  # Changed to use chain system for follow
 )
 
 def account_management(config):
@@ -85,15 +85,15 @@ def main():
             [
                 "Like posts globally (all global activities)",
                 "Like posts from users you follow",
-                "Like posts from users who follow you",
+                "Like posts from users who follow you [Not supported]",
                 "Like posts on a specific profile",
                 "Human-like random liking (imitate real user)",
-                "Follow random users",
+                "Follow random users (chain system)",
                 "Account management (add/switch/remove)",
                 "Settings",
                 "Exit"
             ],
-            helpmsg=MAIN_MENU_HELP + "\n5: Human-like mode randomly likes activities from different sources with random breaks/delays.\n6: Follow random users."
+            helpmsg=MAIN_MENU_HELP + "\n5: Human-like mode randomly likes activities from different sources with random breaks/delays.\n6: Follow random users (chain system)."
         )
 
         try:
@@ -114,10 +114,7 @@ def main():
                 break
 
             elif choice == 3:
-                if not config.get("token"):
-                    print_warning("No AniList account authenticated yet. Please add an account first!")
-                    config = account_management(config)
-                like_followers(config)
+                print_warning("AniList API does not support fetching your followers or other people's followers. This feature may be added in the future if possible.")
                 print_outro()
                 break
 
@@ -141,7 +138,7 @@ def main():
                 if not config.get("token"):
                     print_warning("No AniList account authenticated yet. Please add an account first!")
                     config = account_management(config)
-                follow_random_users(config)
+                follow_chain_users(config)
                 print_outro()
                 break
 
