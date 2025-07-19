@@ -3,9 +3,9 @@ anilist/api.py
 
 Handles all AniList GraphQL API queries and mutations:
 - User lookup
-- Fetching activities (global/following/profile)
+- Fetching activities (global/following/profile/followers)
 - Like activity mutation
-- Get following/follower user IDs (full paging for chain logic)
+- Get following/follower user IDs
 - Viewer info for token/account verification
 
 Depends on: anilist/auth.py, anilist/ratelimit.py
@@ -32,9 +32,6 @@ def get_user_id(username):
     raise Exception(f"Unable to find AniList user '{username}'.")
 
 def get_viewer_info(token):
-    """
-    Returns dict { "id": ..., "username": ... } for authenticated user.
-    """
     query = '''
     query { Viewer { id name } }
     '''
@@ -46,8 +43,10 @@ def get_viewer_info(token):
     return None
 
 def fetch_activities(mode, token, user_id=None, page=1, per_page=30):
-    # Fetches activities for global, following, profile
+    # Fetches activities for global, following, profile, followers
+    # Uses proper fragments
     if mode == "PROFILE":
+        # Profile activities: fetch activities for a specific user
         query = '''
         query ($page: Int, $perPage: Int, $userId: Int) {
           Page(page: $page, perPage: $perPage) {
@@ -80,6 +79,7 @@ def fetch_activities(mode, token, user_id=None, page=1, per_page=30):
         '''
         variables = {"page": page, "perPage": per_page, "userId": user_id}
     else:
+        # GLOBAL, FOLLOWING, FOLLOWERS do not declare $userId
         query = '''
         query ($page: Int, $perPage: Int) {
           Page(page: $page, perPage: $perPage) {
@@ -158,7 +158,7 @@ def like_activity(activity_id, token):
 
 def get_following_user_ids(token):
     """
-    Returns ALL following user IDs for the authenticated user, paged.
+    Returns ALL following user IDs for the authenticated user, paged robustly.
     """
     query = '''
     query ($page: Int!) {
@@ -191,7 +191,7 @@ def get_following_user_ids(token):
 
 def get_follower_user_ids(token):
     """
-    Returns ALL follower user IDs for the authenticated user, paged.
+    Returns ALL follower user IDs for the authenticated user, paged robustly.
     """
     query = '''
     query ($page: Int!) {
@@ -224,7 +224,7 @@ def get_follower_user_ids(token):
 
 def get_following_user_ids_for_other(token, user_id):
     """
-    Get ALL following IDs for any user (for chain logic), paged.
+    Returns ALL following user IDs for any user, paged robustly.
     """
     query = '''
     query ($userId: Int!, $page: Int!) {
@@ -255,7 +255,7 @@ def get_following_user_ids_for_other(token, user_id):
 
 def get_follower_user_ids_for_other(token, user_id):
     """
-    Get ALL follower IDs for any user (for chain logic), paged.
+    Returns ALL follower user IDs for any user, paged robustly.
     """
     query = '''
     query ($userId: Int!, $page: Int!) {
@@ -283,3 +283,51 @@ def get_follower_user_ids_for_other(token, user_id):
                 break
             page += 1
     return ids
+
+def follow_user(user_id, token):
+    mutation = '''
+    mutation ($userId: Int) {
+      FollowUser(userId: $userId) {
+        id
+        name
+      }
+    }
+    '''
+    variables = { "userId": user_id }
+    headers = { "Authorization": f"Bearer {token}" }
+    resp = requests.post(ANILIST_API, json={"query": mutation, "variables": variables}, headers=headers)
+    if resp.status_code == 200:
+        return True
+    return False
+
+def search_users(token, num_to_fetch=100):
+    # NOTE: There is no public global user search, so this is a placeholder.
+    # For real world, you'd use chain expansion or get users from global activities.
+    query = '''
+    query ($page: Int, $perPage: Int) {
+      Page(page: $page, perPage: $perPage) {
+        users {
+          id
+          name
+        }
+      }
+    }
+    '''
+    users = []
+    page = 1
+    per_page = min(num_to_fetch, 50)
+    headers = { "Authorization": f"Bearer {token}" }
+    while len(users) < num_to_fetch:
+        resp = requests.post(ANILIST_API, json={"query": query, "variables": {"page": page, "perPage": per_page}}, headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            page_users = data["data"]["Page"].get("users", [])
+            if not page_users:
+                break
+            users.extend(page_users)
+            if len(page_users) < per_page:
+                break
+            page += 1
+        else:
+            break
+    return users[:num_to_fetch]
