@@ -172,24 +172,11 @@ def get_following_user_ids(token):
     resp = requests.post(ANILIST_API, json={"query": query}, headers=headers)
     if resp.status_code == 200:
         users = resp.json()["data"]["Viewer"]["following"]
-        return [u["id"] for u in users]
+        return [u["id"] for u in users if "id" in u]
     return []
 
 def get_follower_user_ids(token):
-    query = '''
-    query {
-      Viewer {
-        followers(sort: ID_DESC) {
-          id
-        }
-      }
-    }
-    '''
-    headers = { "Authorization": f"Bearer {token}" }
-    resp = requests.post(ANILIST_API, json={"query": query}, headers=headers)
-    if resp.status_code == 200:
-        users = resp.json()["data"]["Viewer"]["followers"]
-        return [u["id"] for u in users]
+    # Deprecated - always return empty since API doesn't allow fetching own followers
     return []
 
 # Optionally, add follow_user and search_users for the follow feature
