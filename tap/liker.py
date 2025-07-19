@@ -7,7 +7,7 @@ Flexible AniList Liker Logic:
 - Human-like mode: random delays, breaks, source switching.
 - Never likes already-liked posts.
 - Shows clean boxed summary with stats.
-- Chain system: follow random users by traversing your followings/followers, then theirs, etc.
+- Chain system: expand from your own account → your following → their following → their following → ... until enough users.
 """
 
 import time
@@ -66,11 +66,33 @@ def show_summary(mode, total, liked, skipped, failed):
     )
     print(boxed_text(summary, "CYAN"))
 
+def fetch_global_activities_until(token, required=None):
+    """
+    Fetch global activities, paginating until required amount is reached.
+    """
+    activities = []
+    page = 1
+    per_page = 30  # AniList default
+    while True:
+        acts = fetch_global_activities(token, page=page, per_page=per_page)
+        if not acts:
+            break
+        activities.extend(acts)
+        if required is not None and len(activities) >= required:
+            activities = activities[:required]
+            break
+        if len(acts) < per_page:
+            break
+        page += 1
+    return activities
+
 def fetch_all_unliked_activities(fetch_func, token, user_id=None, required=None):
+    """
+    Paginate through activities, filtering out already liked, and stopping when required amount is collected.
+    """
     activities = []
     page = 1
     per_page = 30
-    unliked = []
     while True:
         if user_id is not None:
             acts = fetch_func(token, user_id, page=page, per_page=per_page)
@@ -80,17 +102,16 @@ def fetch_all_unliked_activities(fetch_func, token, user_id=None, required=None)
             break
         for act in acts:
             if not act.get("isLiked", False):
-                unliked.append(act)
-                if required is not None and len(unliked) >= required:
+                activities.append(act)
+                if required is not None and len(activities) >= required:
                     break
-        if required is not None and len(unliked) >= required:
+        if required is not None and len(activities) >= required:
+            activities = activities[:required]
             break
         if len(acts) < per_page:
             break
         page += 1
-    if required is not None:
-        unliked = unliked[:required]
-    return unliked
+    return activities
 
 def like_activities(activities, token, config, human_like=False):
     liked = skipped = failed = 0
@@ -146,7 +167,8 @@ def like_global(config, human_like=False):
         return
     limit = ask_for_limit("How many global posts to like? (Enter number or 'unlimited')", default="100")
     print_info("Fetching global activities...")
-    acts = fetch_all_unliked_activities(fetch_global_activities, token, None, limit)
+    acts = fetch_global_activities_until(token, required=limit)
+    acts = [a for a in acts if not a.get("isLiked", False)]
     if not acts:
         print_warning("No unliked global activities found!")
         return
@@ -154,43 +176,52 @@ def like_global(config, human_like=False):
     show_summary("Global", total, liked, skipped, failed)
 
 def like_following(config, human_like=False):
-    like_following_or_followers(config, mode="following", human_like=human_like)
-
-def like_followers(config, human_like=False):
-    like_following_or_followers(config, mode="followers", human_like=human_like)
-
-def like_following_or_followers(config, mode="following", human_like=False):
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-    user_list = None
-    if mode == "following":
-        print_info("Fetching your following list...")
-        user_list = get_following_user_ids(token)
-    elif mode == "followers":
-        print_info("Fetching your follower list...")
-        user_list = get_follower_user_ids(token)
-    else:
-        print_error(f"Unknown mode: {mode}")
-        return
+    user_list = get_following_user_ids(token)
     if not user_list:
-        print_warning(f"You have no {mode}!")
+        print_warning("You have no following!")
         return
-    num_users = ask_for_limit(f"How many users from your {mode} to pick? (Enter number or 'all')", default="10")
+    num_users = ask_for_limit("How many users from your following to pick? (Enter number or 'all')", default="10")
     if num_users and num_users < len(user_list):
         user_list = random.sample(user_list, num_users)
     acts = []
     for uid in user_list:
         acts.extend(fetch_all_unliked_activities(fetch_profile_activities, token, uid))
     if not acts:
-        print_warning(f"No activities found for {mode} users!")
+        print_warning("No activities found for following users!")
         return
-    limit = ask_for_limit(f"How many posts to like from your {mode} list? (Enter number or 'unlimited')", default="100")
+    limit = ask_for_limit("How many posts to like from your following list? (Enter number or 'unlimited')", default="100")
     if limit:
         acts = acts[:limit]
     total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
-    show_summary(mode.capitalize(), total, liked, skipped, failed)
+    show_summary("Following", total, liked, skipped, failed)
+
+def like_followers(config, human_like=False):
+    token = config.get("token")
+    if not token:
+        print_error("No AniList token found! Please authenticate in Account Management.")
+        return
+    user_list = get_follower_user_ids(token)
+    if not user_list:
+        print_warning("You have no followers!")
+        return
+    num_users = ask_for_limit("How many users from your followers to pick? (Enter number or 'all')", default="10")
+    if num_users and num_users < len(user_list):
+        user_list = random.sample(user_list, num_users)
+    acts = []
+    for uid in user_list:
+        acts.extend(fetch_all_unliked_activities(fetch_profile_activities, token, uid))
+    if not acts:
+        print_warning("No activities found for follower users!")
+        return
+    limit = ask_for_limit("How many posts to like from your followers list? (Enter number or 'unlimited')", default="100")
+    if limit:
+        acts = acts[:limit]
+    total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
+    show_summary("Followers", total, liked, skipped, failed)
 
 def like_profile(config, human_like=False):
     token = config.get("token")
@@ -218,10 +249,9 @@ def like_profile(config, human_like=False):
         except Exception as e:
             print_error(f"Could not process user '{username}': {e}")
 
-def chain_users_for_follow(token, depth=3, branch_width=5, max_users=50):
+def chain_users(token, required=100, max_depth=10, branch_width=10):
     """
-    Chain system for follow: traverse your followings/followers, then theirs, etc.
-    Returns a set of user IDs up to max_users, excluding self.
+    Chain system for random users: start from self → following → their following → ... until enough unique users collected.
     """
     try:
         viewer = get_viewer_info(token)
@@ -229,38 +259,41 @@ def chain_users_for_follow(token, depth=3, branch_width=5, max_users=50):
     except Exception:
         self_id = None
 
-    visited = set()
-    current_layer = set(get_following_user_ids(token) + get_follower_user_ids(token))
-    all_ids = set(current_layer)
+    collected = set()
+    queue = []
+    # Start with your following
+    first_layer = set(get_following_user_ids(token))
+    queue.extend(first_layer)
+    collected.update(first_layer)
+    depth = 0
 
-    for layer in range(depth):
-        next_layer = set()
-        for uid in random.sample(list(current_layer), min(branch_width, len(current_layer))):
-            if uid in visited or uid == self_id:
+    while len(collected) < required and queue and depth < max_depth:
+        next_queue = []
+        for uid in queue[:branch_width]:
+            if uid == self_id:
                 continue
-            visited.add(uid)
-            # Fetch this user's followings & followers
             try:
-                following = get_following_user_ids_for_other(token, uid)
-                followers = get_follower_user_ids_for_other(token, uid)
-                for idlist in (following, followers):
-                    for new_uid in idlist:
-                        if new_uid != self_id:
-                            next_layer.add(new_uid)
+                next_following = set(get_following_user_ids_for_other(token, uid))
             except Exception:
-                continue
-        all_ids.update(next_layer)
-        current_layer = next_layer
-        if len(all_ids) >= max_users:
+                next_following = set()
+            # Only add new IDs
+            new_ids = next_following - collected
+            next_queue.extend(list(new_ids))
+            collected.update(new_ids)
+            if len(collected) >= required:
+                break
+        queue = next_queue
+        depth += 1
+        if not queue:
             break
     # Remove self if present
     if self_id is not None:
-        all_ids.discard(self_id)
-    return list(all_ids)[:max_users]
+        collected.discard(self_id)
+    return list(collected)[:required]
 
 def get_following_user_ids_for_other(token, user_id):
     """
-    Fetch following user IDs for another user (not viewer).
+    Get the public following list of any user.
     """
     query = '''
     query ($userId: Int) {
@@ -275,45 +308,21 @@ def get_following_user_ids_for_other(token, user_id):
     variables = { "userId": user_id }
     resp = requests.post(ANILIST_API, json={"query": query, "variables": variables}, headers=headers)
     if resp.status_code == 200:
-        users = resp.json()["data"]["User"]["following"]
-        return [u["id"] for u in users]
-    return []
-
-def get_follower_user_ids_for_other(token, user_id):
-    """
-    Fetch follower user IDs for another user (not viewer).
-    """
-    query = '''
-    query ($userId: Int) {
-      User(id: $userId) {
-        followers(sort: ID_DESC) {
-          id
-        }
-      }
-    }
-    '''
-    headers = { "Authorization": f"Bearer {token}" }
-    variables = { "userId": user_id }
-    resp = requests.post(ANILIST_API, json={"query": query, "variables": variables}, headers=headers)
-    if resp.status_code == 200:
-        users = resp.json()["data"]["User"]["followers"]
+        users = resp.json().get("data", {}).get("User", {}).get("following", [])
         return [u["id"] for u in users]
     return []
 
 def follow_chain_users(config):
     """
-    Chain system for follows: traverse your followings/followers, then theirs, etc., and follow random users.
+    Chain system for follows: start from self → following → their following → ... and follow required number of users.
     """
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-
-    depth = ask_for_limit("Chain depth (how many levels to go, e.g. 2-4 recommended)?", default=3)
-    branch_width = ask_for_limit("Branch width (how many users to sample per level)?", default=5)
-    count = ask_for_limit("How many random users do you want to follow? (Enter number or 'unlimited')", default=10)
+    count = ask_for_limit("How many random users do you want to follow (chain system)? (Enter number or 'unlimited')", default=10)
     print_info("Building chain of users for follow...")
-    user_ids = chain_users_for_follow(token, depth=depth, branch_width=branch_width, max_users=count*2 if count else 50)
+    user_ids = chain_users(token, required=count if count is not None else 50)
     try:
         viewer = get_viewer_info(token)
         self_id = viewer["id"]
@@ -326,11 +335,6 @@ def follow_chain_users(config):
         return
 
     random.shuffle(user_ids)
-    if count is not None and count < len(user_ids):
-        user_ids = user_ids[:count]
-    else:
-        user_ids = user_ids[:count] if count else user_ids
-
     print_info(f"Attempting to follow {len(user_ids)} users (chain system)...")
     followed = failed = 0
     bar = print_progress_bar(user_ids, "Following Users (Chain)")
@@ -479,7 +483,8 @@ def human_like_liker(config):
             acts = []
             source_name = ""
             if src == "global":
-                acts = fetch_all_unliked_activities(fetch_global_activities, token)
+                acts = fetch_global_activities_until(token)
+                acts = [a for a in acts if not a.get("isLiked", False)]
                 source_name = "Global"
             elif src == "following":
                 user_list = get_following_user_ids(token)
