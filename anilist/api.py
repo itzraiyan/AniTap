@@ -5,7 +5,7 @@ Handles all AniList GraphQL API queries and mutations:
 - User lookup
 - Fetching activities (global/following/profile/followers)
 - Like activity mutation
-- Get following/follower user IDs (with pagination)
+- Get following/follower user IDs (with full paging; for any user)
 - Viewer info for token/account verification
 
 Depends on: anilist/auth.py, anilist/ratelimit.py
@@ -158,86 +158,25 @@ def like_activity(activity_id, token):
             return False
         return True
 
-def get_following_user_ids(token):
-    """
-    Returns all user IDs you are following, with proper paging.
-    """
-    query = '''
-    query ($page: Int!) {
-      Page(page: $page, perPage: 50) {
-        pageInfo { hasNextPage }
-        following {
-          id
-        }
-      }
-    }
-    '''
-    headers = { "Authorization": f"Bearer {token}" }
-    user_ids = []
-    page = 1
-    while True:
-        variables = { "page": page }
-        resp = requests.post(ANILIST_API, json={"query": query, "variables": variables}, headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            page_data = data["data"]["Page"]
-            ids = [u["id"] for u in page_data.get("following", []) if "id" in u]
-            user_ids.extend(ids)
-            if not page_data["pageInfo"]["hasNextPage"]:
-                break
-            page += 1
-        else:
-            handled = handle_rate_limit(resp)
-            if not handled:
-                break
-    return user_ids
+# ========== PAGED FOLLOWERS/FOLLOWING QUERIES (for any user) ==========
 
-def get_follower_user_ids(token):
+def get_following_user_ids_paged(token, user_id):
     """
-    Returns all user IDs who follow you, with proper paging.
+    Returns all user IDs the specified user is following (paged, like export.py).
+    If user_id is None, gets Viewer info first.
     """
-    query = '''
-    query ($page: Int!) {
-      Page(page: $page, perPage: 50) {
-        pageInfo { hasNextPage }
-        followers {
-          id
-        }
-      }
-    }
-    '''
-    headers = { "Authorization": f"Bearer {token}" }
-    user_ids = []
-    page = 1
-    while True:
-        variables = { "page": page }
-        resp = requests.post(ANILIST_API, json={"query": query, "variables": variables}, headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            page_data = data["data"]["Page"]
-            ids = [u["id"] for u in page_data.get("followers", []) if "id" in u]
-            user_ids.extend(ids)
-            if not page_data["pageInfo"]["hasNextPage"]:
-                break
-            page += 1
-        else:
-            handled = handle_rate_limit(resp)
-            if not handled:
-                break
-    return user_ids
+    if user_id is None:
+        viewer = get_viewer_info(token)
+        user_id = viewer["id"] if viewer else None
+        if user_id is None:
+            return []
 
-def get_following_user_ids_for_other(token, user_id):
-    """
-    Returns all user IDs another user is following, with paging.
-    """
     query = '''
     query ($userId: Int!, $page: Int!) {
-      Page(page: $page, perPage: 50) {
-        pageInfo { hasNextPage }
-        following(userId: $userId) {
-          id
+        Page(page: $page, perPage: 50) {
+            pageInfo { hasNextPage }
+            following(userId: $userId) { id }
         }
-      }
     }
     '''
     headers = { "Authorization": f"Bearer {token}" }
@@ -246,31 +185,36 @@ def get_following_user_ids_for_other(token, user_id):
     while True:
         variables = { "userId": user_id, "page": page }
         resp = requests.post(ANILIST_API, json={"query": query, "variables": variables}, headers=headers)
-        if resp.status_code == 200:
+        if resp.status_code != 200:
+            handled = handle_rate_limit(resp)
+            if not handled:
+                break
+        else:
             data = resp.json()
             page_data = data["data"]["Page"]
             ids += [u["id"] for u in page_data.get("following", []) if "id" in u]
             if not page_data["pageInfo"]["hasNextPage"]:
                 break
             page += 1
-        else:
-            handled = handle_rate_limit(resp)
-            if not handled:
-                break
     return ids
 
-def get_follower_user_ids_for_other(token, user_id):
+def get_follower_user_ids_paged(token, user_id):
     """
-    Returns all user IDs who follow another user, with paging.
+    Returns all user IDs who follow the specified user (paged, like export.py).
+    If user_id is None, gets Viewer info first.
     """
+    if user_id is None:
+        viewer = get_viewer_info(token)
+        user_id = viewer["id"] if viewer else None
+        if user_id is None:
+            return []
+
     query = '''
     query ($userId: Int!, $page: Int!) {
-      Page(page: $page, perPage: 50) {
-        pageInfo { hasNextPage }
-        followers(userId: $userId) {
-          id
+        Page(page: $page, perPage: 50) {
+            pageInfo { hasNextPage }
+            followers(userId: $userId) { id }
         }
-      }
     }
     '''
     headers = { "Authorization": f"Bearer {token}" }
@@ -279,18 +223,27 @@ def get_follower_user_ids_for_other(token, user_id):
     while True:
         variables = { "userId": user_id, "page": page }
         resp = requests.post(ANILIST_API, json={"query": query, "variables": variables}, headers=headers)
-        if resp.status_code == 200:
+        if resp.status_code != 200:
+            handled = handle_rate_limit(resp)
+            if not handled:
+                break
+        else:
             data = resp.json()
             page_data = data["data"]["Page"]
             ids += [u["id"] for u in page_data.get("followers", []) if "id" in u]
             if not page_data["pageInfo"]["hasNextPage"]:
                 break
             page += 1
-        else:
-            handled = handle_rate_limit(resp)
-            if not handled:
-                break
     return ids
+
+# Viewer-only legacy (not paged), kept for backward compatibility
+def get_following_user_ids(token):
+    viewer = get_viewer_info(token)
+    return get_following_user_ids_paged(token, viewer["id"] if viewer else None)
+
+def get_follower_user_ids(token):
+    viewer = get_viewer_info(token)
+    return get_follower_user_ids_paged(token, viewer["id"] if viewer else None)
 
 def follow_user(user_id, token):
     mutation = '''
