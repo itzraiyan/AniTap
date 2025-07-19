@@ -49,8 +49,12 @@ def print_warning(msg, width=60):
     print(boxed_text(msg, "YELLOW", width))
 
 def print_boxed_safe(msg, color="WHITE", width=60):
+    """
+    Print a boxed message, safely handling progress bar environments (like tqdm).
+    Used during interrupts to avoid layout distortion.
+    """
     try:
         from tqdm import tqdm
         tqdm.write(boxed_text(msg, color, width))
-    except ImportError:
+    except Exception:
         print(boxed_text(msg, color, width))
