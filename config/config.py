@@ -14,7 +14,7 @@ CONFIG_PATH = os.path.expanduser("~/.anitap_config.json")
 
 DEFAULT_CONFIG = {
     "liking_speed": "medium",        # Options: fast, medium, slow
-    "default_mode": "global",        # global, following, profile
+    "default_mode": "global",        # global, following, followers, profile
     "last_used_account": None,       # AniList username of last authenticated account
     "color_theme": "auto",           # auto, light, dark
     "banner_style": "random",        # random, classic, minimal
@@ -70,7 +70,7 @@ def get_failed_actions(config):
     return config.get("failed_actions", [])
 
 def set_default_mode(config, mode):
-    if mode in ("global", "following", "profile"):
+    if mode in ("global", "following", "followers", "profile"):
         config["default_mode"] = mode
         save_config(config)
         return True
