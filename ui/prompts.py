@@ -3,13 +3,20 @@ from ui.colors import boxed_text, print_info, print_error, print_warning, color_
 
 def prompt_boxed(msg, default=None, color="MAGENTA", width=60, helpmsg=None):
     while True:
+        # Context-sensitive "all"/"unlimited" wording:
+        if "user" in msg.lower() or "profile" in msg.lower() or "followers" in msg.lower() or "following" in msg.lower():
+            word = "all"
+        else:
+            word = "unlimited"
         prompt_str = f"{msg}" + (f" [{default}]" if default else "")
+        if word not in prompt_str.lower():
+            prompt_str += f" (Enter number or '{word}')"
         print(boxed_text(prompt_str, color, width))
         val = input("> ").strip()
         if val.lower() == "-help" and helpmsg:
             print_info(helpmsg, width)
             continue
-        # Accept 'all' and 'unlimited' everywhere
+        # Accept 'all' and 'unlimited' everywhere, but convert to None
         if not val and default is not None:
             return default
         if val.lower() in ("all", "unlimited", "inf", "forever"):
