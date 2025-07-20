@@ -3,9 +3,9 @@ anilist/api.py
 
 Handles all AniList GraphQL API queries and mutations:
 - User lookup
-- Fetching activities (global/following/profile/followers)
-- Like activity mutation
-- Get following/follower user IDs
+- Fetching activities (global/following/profile/followers) using the EXACT queries and logic from gaf.py, gaf2.py, sal.py, and tree.py.
+- Like activity mutation (ToggleLikeV2 from gaf.py/sal.py)
+- Get following/follower user IDs with robust pagination (sal.py/tree.py logic)
 - Viewer info for token/account verification
 
 Depends on: anilist/auth.py, anilist/ratelimit.py
@@ -43,10 +43,8 @@ def get_viewer_info(token):
     return None
 
 def fetch_activities(mode, token, user_id=None, page=1, per_page=30):
-    # Fetches activities for global, following, profile, followers
-    # Uses proper fragments
+    # Uses fragments and logic as in gaf2.py/sal.py: fetches all activity types for user/global
     if mode == "PROFILE":
-        # Profile activities: fetch activities for a specific user
         query = '''
         query ($page: Int, $perPage: Int, $userId: Int) {
           Page(page: $page, perPage: $perPage) {
@@ -79,7 +77,7 @@ def fetch_activities(mode, token, user_id=None, page=1, per_page=30):
         '''
         variables = {"page": page, "perPage": per_page, "userId": user_id}
     else:
-        # GLOBAL, FOLLOWING, FOLLOWERS do not declare $userId
+        # GLOBAL, FOLLOWING, FOLLOWERS - all types
         query = '''
         query ($page: Int, $perPage: Int) {
           Page(page: $page, perPage: $perPage) {
@@ -139,17 +137,34 @@ def fetch_profile_activities(token, user_id, page=1, per_page=30):
 
 def like_activity(activity_id, token):
     mutation = '''
-    mutation ($id: Int) {
-      ToggleLikeV2(id: $id, type: ACTIVITY) {
-        __typename
-      }
+    mutation ToggleLike($id: Int!, $type: LikeableType!) {
+        ToggleLikeV2(id: $id, type: $type) {
+            ... on TextActivity {
+                id
+                likeCount
+                isLiked
+            }
+            ... on ListActivity {
+                id
+                likeCount
+                isLiked
+            }
+            ... on MessageActivity {
+                id
+                likeCount
+                isLiked
+            }
+        }
     }
     '''
-    variables = { "id": activity_id }
+    variables = { "id": activity_id, "type": "ACTIVITY" }
     headers = { "Authorization": f"Bearer {token}" }
     resp = requests.post(ANILIST_API, json={"query": mutation, "variables": variables}, headers=headers)
     if resp.status_code == 200:
-        return True
+        data = resp.json()
+        if "ToggleLikeV2" in data.get("data", {}):
+            return True
+        return False
     else:
         handled = handle_rate_limit(resp)
         if not handled:
@@ -159,6 +174,7 @@ def like_activity(activity_id, token):
 def get_following_user_ids(token):
     """
     Returns ALL following user IDs for the authenticated user, paged robustly.
+    Uses the exact paginated queries from sal.py/tree.py.
     """
     query = '''
     query ($page: Int!) {
@@ -192,6 +208,7 @@ def get_following_user_ids(token):
 def get_follower_user_ids(token):
     """
     Returns ALL follower user IDs for the authenticated user, paged robustly.
+    Uses the exact paginated queries from sal.py/tree.py.
     """
     query = '''
     query ($page: Int!) {
@@ -225,6 +242,7 @@ def get_follower_user_ids(token):
 def get_following_user_ids_for_other(token, user_id):
     """
     Returns ALL following user IDs for any user, paged robustly.
+    Uses the exact paginated queries from tree.py/sal.py.
     """
     query = '''
     query ($userId: Int!, $page: Int!) {
@@ -256,6 +274,7 @@ def get_following_user_ids_for_other(token, user_id):
 def get_follower_user_ids_for_other(token, user_id):
     """
     Returns ALL follower user IDs for any user, paged robustly.
+    Uses the exact paginated queries from tree.py/sal.py.
     """
     query = '''
     query ($userId: Int!, $page: Int!) {
