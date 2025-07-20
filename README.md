@@ -1,4 +1,4 @@
-# AniTap: The Ultimate Anime-Themed AniList Mass-Liker CLI 🌸
+# AniTap: The Ultimat AniList Mass-Liker CLI 🌸
 
 ![AniTap Banner](https://files.catbox.moe/jx8op2.png)
 
@@ -18,14 +18,17 @@ AniTap is a beginner-friendly, interactive Python tool for **mass-liking AniList
   - Like all global activities  
   - Like posts from people you follow  
   - Like all posts on a specific profile  
-  - **Human-Like Random Liker:** AniTap imitates true human behavior—random sources, random breaks, random selection, unpredictable timing. See [Human-Like Mode](#-human-like-random-liker-mode).
+  - Like posts from your followers  
+  - **Human-Like Random Liker:** AniTap imitates true human behavior—random sources, random breaks, random selection, unpredictable timing.
+  - **Chain & Random Follow:** Follow random users via chain system or global extraction.
 * 🔒 **Secure OAuth2 authentication:**  
   Guided, step-by-step login using AniList API credentials.  
   No password ever requested; tokens are stored locally.
 * 👤 **Multi-account support:**  
   Add, switch, and remove AniList accounts at any time.
 * 🛡️ **Rate limit protection:**  
-  Spinner/countdown and automatic retry for safe API use.
+  Spinner/countdown and automatic retry for safe API use.  
+  **Progress bar** for all mass actions (liking, following, etc.).
 * ⏱️ **Progress bars & session summaries:**  
   See stats for processed, liked, skipped, and failed posts.
 * 🔁 **Failed actions saved for easy retry:**  
@@ -106,11 +109,15 @@ You'll be greeted by anime ASCII banners, a random quote, and a boxed main menu.
 
 1. **Like posts globally**
 2. **Like posts from users you follow**
-3. **Like all posts on a specific profile**
-4. **Human-like random liking (imitate real user)**
-5. **Account management (add/switch/remove)**
-6. **Settings**
-7. **Exit**
+3. **Like posts from users who follow you**
+4. **Like all posts on a specific profile**
+5. **Human-like random liking (imitate real user)**
+6. **Follow random users**
+7. **Follow users via chain system**
+8. **Retry failed like actions**
+9. **Account management**
+10. **Settings**
+11. **Exit**
 
 **Type the number or `-help` at any prompt for friendly, detailed guidance!**
 
@@ -130,16 +137,29 @@ You'll be greeted by anime ASCII banners, a random quote, and a boxed main menu.
 
 #### **Global Mode**
 - Like every visible public activity on AniList.
+- Uses robust, paginated GraphQL queries for all activity types (from gaf.py, gaf2.py, sal.py).
 
 #### **Following Mode**
 - Like posts only from users you follow.
+- Uses paginated, reliable queries for fetching your following list (from sal.py/tree.py).
+
+#### **Followers Mode**
+- Like posts only from users who follow you.
+- Uses paginated, reliable queries for fetching your followers (from sal.py/tree.py).
 
 #### **Profile Mode**
 - Like all posts on a specific user's profile (give username or profile URL).
 
+#### **Chain System**
+- Follow users via BFS expansion (your following → their following → ...).
+- Uses exact chain logic from tree.py for robust, non-repeating user discovery.
+
+#### **Random Follow**
+- Extracts user IDs from global activities using gaf2.py logic for following random AniList users.
+
 #### **Human-Like Random Liker Mode**
 **NEW!** AniTap can now **imitate true human behavior**:
-- Randomly selects source: global, following, or profiles you provide.
+- Randomly selects source: global, following, followers, or profiles you provide.
 - Randomly picks only a few activities per batch.
 - Randomly skips some activities (not every post is liked).
 - Delays between likes are unpredictable—sometimes just seconds, often minutes, sometimes even a long break (15–60 minutes or more!).
@@ -170,6 +190,13 @@ You'll be greeted by anime ASCII banners, a random quote, and a boxed main menu.
 
 ---
 
+### ⏳ Progress Bars & Rate Limit Handling
+
+- **Progress bars** (via TQDM) for all mass actions—liking, following, chain, etc.
+- **Rate limit spinner** and boxed prompts for “rate limit hit”, “rate limit over”, etc. These are preserved for clarity and user-friendliness, just like the original code.
+
+---
+
 ## 🌸 Example Session
 
 ```sh
@@ -183,15 +210,19 @@ $ python main.py
 What would you like to do?
   1. Like posts globally (all global activities)
   2. Like posts from users you follow
-  3. Like all posts on a specific profile
-  4. Human-like random liking (imitate real user)
-  5. Account management
-  6. Settings
-  7. Exit
+  3. Like posts from users who follow you
+  4. Like all posts on a specific profile
+  5. Human-like random liking (imitate real user)
+  6. Follow random users
+  7. Follow users via chain system
+  8. Retry failed like actions
+  9. Account management
+  10. Settings
+  11. Exit
 (Type the number or -help for info)
 > 4
 
-[Human-Like Mode begins: AniTap randomly likes a handful of activities from global/following/profiles, waits random intervals (sometimes several minutes!), skips some likes, and occasionally "takes a break" for 15-60 minutes. The session runs for a realistic number of likes before ending automatically.]
+[Human-Like Mode begins: AniTap randomly likes a handful of activities from global/following/followers/profiles, waits random intervals (sometimes several minutes!), skips some likes, and occasionally "takes a break" for 15-60 minutes. The session runs for a realistic number of likes before ending automatically.]
 
 Thanks for using AniTap! Keep spreading anime love!
 “No matter how deep the night, it always turns to day, eventually.” – Brook
@@ -220,7 +251,7 @@ AniTap/
 │   ├── ratelimit.py         # Rate limit detection and spinner
 │
 ├── tap/                     # Main liking logic & workflows
-│   ├── liker.py             # Implements global, following, profile, and human-like modes
+│   ├── liker.py             # Implements global, following, followers, profile, chain, and human-like modes
 │   ├── summary.py           # Session summary, failed/retry logic
 │
 ├── config/                  # Configuration management
@@ -294,6 +325,7 @@ MIT License. See LICENSE for details.
 
 - UI inspiration: [AniPort](https://github.com/itzraiyan/AniPort)
 - Liking logic: [anilist-auto-liker](https://github.com/DanielWTE/anilist-auto-liker), [AniLikerV2](https://github.com/anas1412/AniLikerV2)
+- Chain/following/follower logic: [tree.py], [sal.py], [gaf.py], [gaf2.py] (used as inspiration for reliable mass operations)
 - ASCII banners, anime quotes, and terminal magic!
 
 ---
