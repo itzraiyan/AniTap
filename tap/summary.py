@@ -3,6 +3,7 @@ tap/summary.py
 
 Handles AniTap boxed summary after liking operations,
 saving failed actions for retry, and retry logic.
+Keeps boxed UI/phrasing and retry prompts from original AniTap.
 """
 
 from ui.colors import boxed_text, print_success, print_error, print_info
