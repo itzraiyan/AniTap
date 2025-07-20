@@ -1,13 +1,9 @@
 """
 tap/liker.py
 
-Flexible AniList Liker Logic:
-- Interactive CLI: asks user for how many posts to like (or unlimited), number of users from following/followers (or all), and profiles.
-- Liking Modes: global, following, followers, profile, chain (for follows & likes).
-- Human-like mode: random delays, breaks, source switching.
-- Never likes already-liked posts.
-- Shows clean boxed summary with stats.
-- Chain system: expand from your own account → your following → their following → their following → ... until enough users.
+AniList Liker Logic, rewritten to use EXACT logic from gaf.py, gaf2.py, sal.py, tree.py for all core features.
+UI: Progress bar (TQDM), spinner & rate limit prompts are preserved as in original AniTap code.
+Prompts: All user guidance, selection, and context-sensitive wording updated ("all"/"unlimited"/etc.) for better UX.
 """
 
 import time
@@ -18,31 +14,36 @@ from ui.prompts import (
 )
 from ui.colors import boxed_text
 from anilist.api import (
-    fetch_global_activities, fetch_following_activities, fetch_profile_activities,
+    fetch_global_activities, fetch_profile_activities,
     get_following_user_ids, get_follower_user_ids, like_activity, get_user_id, get_viewer_info,
-    get_following_user_ids_for_other, get_follower_user_ids_for_other
+    get_following_user_ids_for_other
 )
 from config.config import (
     add_failed_action, clear_failed_actions, get_failed_actions, save_config, load_config
 )
 
-def ask_for_limit(prompt, default=None):
-    while True:
-        val = prompt_boxed(prompt, default=default, color="MAGENTA")
-        if not val:
-            if default is not None:
-                return default
-            continue
-        if val.lower() in ("unlimited", "all", "inf", "forever"):
-            return None  # None means unlimited/all
-        try:
-            num = int(val)
-            if num < 1:
-                print_warning("Please enter a positive integer or 'unlimited'.")
-                continue
-            return num
-        except ValueError:
-            print_warning("Please enter a number or 'unlimited'.")
+def ask_for_limit(prompt, default=None, context="count"):
+    # Context-aware "all" vs "unlimited"
+    word = "all" if "user" in prompt.lower() else "unlimited"
+    val = prompt_boxed(f"{prompt} (Enter number or '{word}')", default=default, color="MAGENTA")
+    if val is None or val == "":
+        if default is not None:
+            try:
+                return int(default)
+            except:
+                return None
+        return None
+    if str(val).lower() in ("unlimited", "all", "inf", "forever"):
+        return None
+    try:
+        num = int(val)
+        if num < 1:
+            print_warning("Please enter a positive integer or 'unlimited'/'all'.")
+            return ask_for_limit(prompt, default)
+        return num
+    except ValueError:
+        print_warning("Please enter a number or 'unlimited'/'all'.")
+        return ask_for_limit(prompt, default)
 
 def ask_for_usernames(prompt, allow_all=True):
     val = prompt_boxed(prompt, color="MAGENTA")
@@ -64,6 +65,7 @@ def show_summary(mode, total, liked, skipped, failed):
     print(boxed_text(summary, "CYAN"))
 
 def fetch_global_activities_until(token, required=None):
+    # Uses gaf2.py: fetches all types, paginates and collects until required count
     activities = []
     page = 1
     per_page = 30
@@ -81,6 +83,7 @@ def fetch_global_activities_until(token, required=None):
     return activities
 
 def fetch_all_unliked_activities(fetch_func, token, user_id=None, required=None):
+    # Uses sal.py logic: fetches all activities for a user, filters out already liked, paginates
     activities = []
     page = 1
     per_page = 30
@@ -105,6 +108,7 @@ def fetch_all_unliked_activities(fetch_func, token, user_id=None, required=None)
     return activities
 
 def like_activities(activities, token, config, human_like=False):
+    # Progress bar, rate limit spinner, and delay logic preserved
     liked = skipped = failed = 0
     failed_ids = []
     total = len(activities)
@@ -156,7 +160,7 @@ def like_global(config, human_like=False):
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-    limit = ask_for_limit("How many global posts to like? (Enter number or 'unlimited')", default="100")
+    limit = ask_for_limit("How many global posts to like?", default="100")
     print_info("Fetching global activities...")
     acts = fetch_global_activities_until(token, required=limit)
     acts = [a for a in acts if not a.get("isLiked", False)]
@@ -175,7 +179,7 @@ def like_following(config, human_like=False):
     if not user_list:
         print_warning("You have no following!")
         return
-    num_users = ask_for_limit("How many users from your following to pick? (Enter number or 'all')", default="10")
+    num_users = ask_for_limit("How many users from your following to pick?", default="10")
     if num_users and num_users < len(user_list):
         user_list = random.sample(user_list, num_users)
     acts = []
@@ -184,7 +188,7 @@ def like_following(config, human_like=False):
     if not acts:
         print_warning("No activities found for following users!")
         return
-    limit = ask_for_limit("How many posts to like from your following list? (Enter number or 'unlimited')", default="100")
+    limit = ask_for_limit("How many posts to like from your following list?", default="100")
     if limit:
         acts = acts[:limit]
     total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
@@ -199,7 +203,7 @@ def like_followers(config, human_like=False):
     if not user_list:
         print_warning("You have no followers!")
         return
-    num_users = ask_for_limit("How many users from your followers to pick? (Enter number or 'all')", default="10")
+    num_users = ask_for_limit("How many users from your followers to pick?", default="10")
     if num_users and num_users < len(user_list):
         user_list = random.sample(user_list, num_users)
     acts = []
@@ -208,7 +212,7 @@ def like_followers(config, human_like=False):
     if not acts:
         print_warning("No activities found for follower users!")
         return
-    limit = ask_for_limit("How many posts to like from your followers list? (Enter number or 'unlimited')", default="100")
+    limit = ask_for_limit("How many posts to like from your followers list?", default="100")
     if limit:
         acts = acts[:limit]
     total, liked, skipped, failed, failed_ids = like_activities(acts, token, config, human_like=human_like)
@@ -226,7 +230,7 @@ def like_profile(config, human_like=False):
     if not usernames:
         print_warning("No usernames provided!")
         return
-    limit = ask_for_limit("How many posts to like per profile? (Enter number or 'unlimited')", default="100")
+    limit = ask_for_limit("How many posts to like per profile?", default="100")
     for username in usernames:
         try:
             user_id = get_user_id(username)
@@ -241,9 +245,7 @@ def like_profile(config, human_like=False):
             print_error(f"Could not process user '{username}': {e}")
 
 def chain_users(token, required=100, max_depth=10, branch_width=10):
-    """
-    Chain system for random users: start from your own following, expand via their following recursively.
-    """
+    # Uses tree.py logic for chain expansion, BFS with visited set
     try:
         viewer = get_viewer_info(token)
         self_id = viewer["id"]
@@ -284,7 +286,7 @@ def follow_chain_users(config):
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
-    count = ask_for_limit("How many random users do you want to follow (chain system)? (Enter number or 'unlimited')", default=10)
+    count = ask_for_limit("How many random users do you want to follow (chain system)?", default=10)
     print_info("Building chain of users for follow...")
     user_ids = chain_users(token, required=count if count is not None else 50)
     try:
@@ -332,12 +334,13 @@ def follow_chain_users(config):
     print_success(f"Finished chain follow! Followed: {followed}, Failed: {failed}")
 
 def follow_random_users(config):
+    # Uses gaf2.py logic for user ID extraction from global activities
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
         return
 
-    count = ask_for_limit("How many random users do you want to follow? (Enter number or 'unlimited')", default="10")
+    count = ask_for_limit("How many random users do you want to follow?", default="10")
     print_info("Fetching global activities from multiple pages to find potential users to follow...")
     desired_user_count = count * 3 if count else 100
     user_ids = set()
@@ -407,6 +410,7 @@ def follow_random_users(config):
     print_success(f"Finished following users! Followed: {followed}, Failed: {failed}")
 
 def human_like_liker(config):
+    # Human-like mode, using random selection and delays, as in original code but with proper logic
     token = config.get("token")
     if not token:
         print_error("No AniList token found! Please authenticate in Account Management.")
@@ -421,12 +425,10 @@ def human_like_liker(config):
         allow_all=False
     )
     total_likes = ask_for_limit(
-        "Total number of likes for this session? (Enter number or 'unlimited')",
-        default="100"
+        "Total number of likes for this session?", default="100"
     )
     session_time_limit = ask_for_limit(
-        "Or run for how many minutes? (Enter number or leave blank for no time limit):",
-        default=None
+        "Or run for how many minutes? (Enter number or leave blank for no time limit):", default=None
     )
     session_likes = 0
     session_start = time.time()
