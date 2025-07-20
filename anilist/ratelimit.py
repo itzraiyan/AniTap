@@ -2,6 +2,7 @@
 anilist/ratelimit.py
 
 Handles AniList API rate limiting and exponential backoff for AniTap.
+Retains original AniTap UI: spinner animation, boxed prompts for rate limit hit/over, hash numbers, etc.
 """
 
 import time
