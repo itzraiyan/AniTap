@@ -63,7 +63,7 @@ def handle_rate_limit(resp):
             try:
                 wait = int(float(retry_after))
             except Exception:
-                wait = 15
+                wait = 60
         else:
             wait = 15
         spinner_wait(wait, hit_number)
