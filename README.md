@@ -1,4 +1,4 @@
-# AniTap: The Ultimat AniList Mass-Liker CLI 🌸
+# AniTap: The Ultimate AniList Mass-Liker CLI 🌸
 
 ![AniTap Banner](https://files.catbox.moe/jx8op2.png)
 
